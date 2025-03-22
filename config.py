@@ -11,6 +11,6 @@ ASSISTANT_ID = os.getenv("OPENAI_ASSISTANT_ID")  # заранее созданн
 ALLOWED_USERS = [792501309, 916387745, 2120274462]  # Здесь укажите ID пользователей
 
 
-REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
-REDIS_PORT = int(os.getenv("REDIS_PORT", 6379))
-REDIS_DB = int(os.getenv("REDIS_DB", 0))
+REDIS_HOST = os.getenv("REDIS_HOST")
+REDIS_PORT = int(os.getenv("REDIS_PORT"))
+REDIS_DB = int(os.getenv("REDIS_DB"))
