@@ -1,7 +1,3 @@
-Вот обновлённый `README.MD` на английском, в стиле оригинала:
-
----
-
 # 🤖 Telegram GPT Bot using OpenAI Assistants API
 
 This is an asynchronous, modular, production-ready Telegram bot that connects authorized users to an OpenAI Assistant via the Assistants API.  
