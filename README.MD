@@ -152,6 +152,175 @@ journalctl -u mygpt_bot -f
 
 ---
 
+## 🚀 Management Scripts
+
+The project includes a comprehensive set of bash scripts for easy bot management and deployment automation.
+
+### 📋 Available Scripts
+
+#### 🚀 start.sh - Bot Startup
+```bash
+./start.sh
+```
+**Functions:**
+- Creates virtual environment if it doesn't exist
+- Checks for all required files
+- Installs/updates dependencies
+- Starts bot in background mode
+- Saves process PID for management
+
+#### ⏹️ stop.sh - Bot Shutdown
+```bash
+./stop.sh
+```
+**Functions:**
+- Gracefully terminates bot process
+- Uses soft shutdown (SIGTERM)
+- Forces termination if needed (SIGKILL)
+- Cleans up PID file
+- Can find manually started processes
+
+#### 🔄 restart.sh - Bot Restart
+```bash
+./restart.sh
+```
+**Functions:**
+- Stops bot via stop.sh
+- Adds pause interval
+- Starts bot via start.sh
+
+#### 📥 update.sh - Bot Update
+```bash
+./update.sh
+```
+**Functions:**
+- Checks git repository for updates
+- Creates configuration backup
+- Stops bot (if running)
+- Updates code from git
+- Updates Python dependencies
+- Starts bot (if it was running)
+- Cleans up old backups
+
+#### 📊 status.sh - Status Check
+```bash
+./status.sh
+```
+**Shows:**
+- Bot process status
+- Log file information
+- Virtual environment state
+- Configuration (.env file)
+- Network connections (internet, APIs)
+- System resources (CPU, memory, disk)
+- Git status
+
+#### 📝 logs.sh - Log Management
+```bash
+./logs.sh [options]
+```
+**Options:**
+- `./logs.sh` - follow logs in real-time
+- `./logs.sh -t 100` - show last 100 lines
+- `./logs.sh -e` - show errors only
+- `./logs.sh -w` - show warnings and errors
+- `./logs.sh -s "text"` - search in logs
+- `./logs.sh -c` - clear logs (with backup)
+- `./logs.sh -h` - help
+
+### 🔧 Quick Start
+
+#### First Run
+```bash
+# Set permissions (if needed)
+chmod +x *.sh
+
+# Start bot
+./start.sh
+
+# Check status
+./status.sh
+
+# View logs
+./logs.sh
+```
+
+#### Daily Usage
+```bash
+# Check status
+./status.sh
+
+# View logs
+./logs.sh -t 50
+
+# Restart if needed
+./restart.sh
+
+# Update to new version
+./update.sh
+```
+
+### 📁 Created Files
+
+- `bot.pid` - PID of running process
+- `bot.log` - bot log file
+- `backup_YYYYMMDD_HHMMSS/` - backups during updates
+- `bot.log.backup.YYYYMMDD_HHMMSS` - log backups
+
+### ⚠️ Important Notes
+
+1. **Virtual Environment**: Created automatically in `venv/` folder
+2. **File Permissions**: All scripts must be executable (`chmod +x`)
+3. **Configuration**: Ensure `.env` file is properly configured
+4. **Git Repository**: update.sh requires initialized git repository
+5. **Internet Connection**: Required for updates and bot operation
+6. **🔒 Process Safety**: Scripts work only with processes in current directory and do NOT affect other bots on the server
+
+### 🚨 Troubleshooting
+
+#### Bot Won't Start
+```bash
+# Check status
+./status.sh
+
+# View errors in logs
+./logs.sh -e
+
+# Check configuration
+cat .env
+```
+
+#### Process Stuck
+```bash
+# Try to stop
+./stop.sh
+
+# If that doesn't work, find and kill process
+ps aux | grep python
+kill -9 <PID>
+```
+
+#### Update Issues
+```bash
+# Check git status
+git status
+
+# Restore from backup
+ls -la backup_*/
+cp backup_XXXXXX/.env .
+```
+
+### 💡 Tips
+
+- Use `./status.sh` for quick diagnostics
+- Regularly check logs with `./logs.sh -e`
+- Run `./update.sh` to get updates
+- If problems occur, first check `.env` file
+- For debugging use `./logs.sh -s "error"`
+- **🔒 Multi-Bot Environment**: Scripts safely work on servers with multiple bots, identifying processes by full file path
+
+---
+
 ## 🔧 TODO / Ideas for Extension
 
 - 🔄 Log rotation support
