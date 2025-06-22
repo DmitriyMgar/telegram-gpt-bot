@@ -1,5 +1,150 @@
 # Project Changelog & Progress Report
 
+## Version 1.3.0 - User Analytics System
+**Date:** June 22, 2025  
+**Time:** 16:03 MSK  
+**Status:** ✅ COMPLETE - Ready for production deployment
+
+### Overview
+Implemented comprehensive user analytics system for tracking OpenAI API token consumption by users and dates. The system provides granular data collection without storing actual message content, focusing solely on usage statistics.
+
+## ✅ Completed Tasks
+
+### 1. User Analytics Module (`user_analytics.py`)
+- ✅ Created `UserAnalytics` class with SQLite backend
+- ✅ Implemented async database operations with `aiosqlite`
+- ✅ Added robust error handling and logging
+- ✅ Created optimized database schema with indexes
+- ✅ Built comprehensive usage tracking and reporting functions
+
+### 2. Database Implementation
+- ✅ SQLite schema: `user_analytics` table with user_id, username, request_date, tokens_used
+- ✅ Automated database initialization and table creation
+- ✅ Performance indexes on user_id, request_date, and composite keys
+- ✅ Data validation and sanitization
+- ✅ Graceful handling of database errors
+
+### 3. OpenAI API Integration (`openai_handler.py`)
+- ✅ Modified `send_message_and_get_response()` to extract token usage data
+- ✅ Integrated token counting from OpenAI API response (`usage.total_tokens`)
+- ✅ Added username parameter for better user tracking
+- ✅ Implemented fallback handling when token data is unavailable
+
+### 4. Bot Integration (`main.py`)
+- ✅ Integrated analytics initialization in bot startup
+- ✅ Added `get_username()` utility function for consistent user identification
+- ✅ Modified message handler to pass username to OpenAI handler
+- ✅ Fixed event loop conflicts with Telegram Bot API
+- ✅ Implemented graceful shutdown with analytics cleanup
+
+### 5. Configuration Updates
+- ✅ Added `ANALYTICS_DB_PATH` environment variable to `config.py`
+- ✅ Updated `requirements.txt` with `aiosqlite==0.20.0` dependency
+- ✅ Set default database path to `./data/user_analytics.db`
+- ✅ Created `data/` directory for database storage
+
+### 6. Analytics Functions Implemented
+- ✅ `record_usage()` - Record token consumption per user/date
+- ✅ `get_user_daily_usage()` - Daily consumption by user
+- ✅ `get_user_total_usage()` - Total consumption by user
+- ✅ `get_all_users_usage_by_date()` - All users consumption for specific date
+- ✅ `get_user_usage_stats()` - Extended user statistics with daily breakdown
+
+### 7. Analytics Viewing Tool (`view_analytics.py`)
+- ✅ Created comprehensive analytics viewing script
+- ✅ Implemented multiple viewing modes: all data, users, daily, info
+- ✅ Added command-line interface with help system
+- ✅ Built formatted data display with proper table layouts
+- ✅ Integrated database connection and error handling
+
+## 🎯 Key Features Delivered
+
+1. **Privacy-First Design**: No message content stored, only metadata and token counts
+2. **Efficient Storage**: SQLite with optimized indexes for fast queries
+3. **Async Architecture**: Non-blocking database operations
+4. **Error Resilience**: Bot continues working even if analytics fails
+5. **Comprehensive Tracking**: User identification, date-based aggregation, token counting
+6. **Future-Ready**: Extensible design for additional analytics features
+
+## 📁 New Files Created
+
+- **`user_analytics.py`** - Core analytics module with UserAnalytics class
+- **`view_analytics.py`** - Analytics viewing tool with multiple display modes
+- **`data/user_analytics.db`** - SQLite database file (auto-generated)
+
+## 📊 Data Schema
+
+```sql
+CREATE TABLE user_analytics (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    username TEXT,
+    request_date DATE NOT NULL,
+    tokens_used INTEGER NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+```
+
+## 🔧 Technical Implementation
+
+- **Database**: SQLite with async operations via `aiosqlite`
+- **Storage Location**: `./data/user_analytics.db` (configurable)
+- **Token Extraction**: From OpenAI API `usage.total_tokens` field
+- **User Identification**: Telegram username, first name, or fallback ID
+- **Date Tracking**: Daily aggregation with ISO date format
+
+## 🛠️ Deployment & Troubleshooting
+
+### Deployment Steps Completed:
+1. ✅ Installed dependency: `aiosqlite==0.20.0`
+2. ✅ Added `ANALYTICS_DB_PATH=./data/user_analytics.db` to configuration
+3. ✅ Created `data/` directory for database storage
+4. ✅ Resolved event loop conflicts with Telegram Bot API
+5. ✅ Fixed bot startup issues and duplicate process conflicts
+6. ✅ Verified database initialization and schema creation
+
+### Issues Resolved:
+- ✅ **Event Loop Conflicts**: Fixed asyncio conflicts between analytics initialization and Telegram Bot API
+- ✅ **Duplicate Bot Processes**: Identified and resolved conflicts from multiple bot instances
+- ✅ **Database Initialization**: Ensured proper async database setup during bot startup
+- ✅ **Dependency Management**: Properly installed all required packages in virtual environment
+
+### Analytics Viewing Commands:
+```bash
+# Activate virtual environment first
+source venv/bin/activate
+
+# View all analytics data
+python view_analytics.py
+
+# View user statistics only
+python view_analytics.py users
+
+# View daily statistics only  
+python view_analytics.py daily
+
+# View database info only
+python view_analytics.py info
+
+# Show help
+python view_analytics.py help
+```
+
+### Direct SQL Access:
+```bash
+# Install sqlite3 if needed
+apt install sqlite3
+
+# Access database directly
+sqlite3 data/user_analytics.db
+
+# Example queries:
+SELECT * FROM user_analytics ORDER BY created_at DESC LIMIT 10;
+SELECT user_id, username, SUM(tokens_used) FROM user_analytics GROUP BY user_id;
+```
+
+---
+
 ## Version 1.2.0 - Management Scripts Suite
 **Date:** June 22, 2025  
 **Time:** 15:17 MSK  
@@ -156,6 +301,6 @@ Successfully migrated from static user authorization (`ALLOWED_USERS` list) to d
 
 ## Deployment Notes
 
-**Current Version:** 1.2.0  
-**Last Updated:** June 22, 2025, 15:17 MSK  
+**Current Version:** 1.3.0  
+**Last Updated:** June 22, 2025, 16:03 MSK  
 **Next Review:** TBD 

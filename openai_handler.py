@@ -4,6 +4,7 @@ from session_manager import get_thread_id, set_thread_id
 from logger import logger
 from openai import AsyncOpenAI
 import tempfile
+from user_analytics import analytics
 
 client = AsyncOpenAI(api_key=OPENAI_API_KEY)
 
@@ -11,7 +12,7 @@ async def create_thread():
     thread = await client.beta.threads.create()
     return thread.id
 
-async def send_message_and_get_response(user_id: int, user_message: str) -> str:
+async def send_message_and_get_response(user_id: int, user_message: str, username: str = None) -> str:
     thread_id = get_thread_id(user_id)
     if not thread_id:
         thread_id = await create_thread()
@@ -39,6 +40,19 @@ async def send_message_and_get_response(user_id: int, user_message: str) -> str:
         if run_status.status in ["completed", "failed", "cancelled"]:
             break
         await asyncio.sleep(1)
+
+    # Записываем использование токенов в аналитику
+    tokens_used = 0
+    if run_status.usage and run_status.usage.total_tokens:
+        tokens_used = run_status.usage.total_tokens
+        logger.debug(f"[OpenAI] Tokens used: {tokens_used} (prompt: {run_status.usage.prompt_tokens}, completion: {run_status.usage.completion_tokens})")
+    
+    # Записываем в аналитику
+    if tokens_used > 0:
+        try:
+            await analytics.record_usage(user_id, username, tokens_used)
+        except Exception as e:
+            logger.error(f"Failed to record usage analytics: {e}")
 
     # Получаем только новые сообщения
     messages = await client.beta.threads.messages.list(thread_id=thread_id)

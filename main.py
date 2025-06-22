@@ -1,5 +1,6 @@
 from logger import logger
 import os
+import asyncio
 
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
@@ -8,9 +9,23 @@ from openai_handler import send_message_and_get_response, get_message_history, e
 from session_manager import reset_thread
 from telegram.constants import ChatAction
 from subscription_checker import check_channel_subscription
+from user_analytics import analytics
 
 # Путь до лог-файла
 LOG_FILE = os.path.join(os.path.dirname(__file__), "bot.log")
+
+def get_username(update: Update) -> str:
+    """
+    Получает имя пользователя для записи в аналитику.
+    
+    Args:
+        update: Telegram Update объект
+        
+    Returns:
+        str: Имя пользователя или fallback значение
+    """
+    user = update.effective_user
+    return user.username or user.first_name or f"user_{user.id}"
 
 async def is_authorized_async(user_id: int) -> bool:
     """
@@ -70,10 +85,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     
     user_message = update.message.text
+    username = get_username(update)
     await update.message.chat.send_action(action="typing")
-    logger.info(f"Message from {user_id}: {user_message}")
+    logger.info(f"Message from {user_id} (@{username}): {user_message}")
 
-    reply = await send_message_and_get_response(user_id, user_message)
+    reply = await send_message_and_get_response(user_id, user_message, username)
     await update.message.reply_text(reply)
 
 async def history(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -138,7 +154,22 @@ async def subscribe(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "После подписки просто отправьте любое сообщение боту!"
         )
 
+def init_analytics_sync():
+    """Синхронная обертка для инициализации аналитики."""
+    try:
+        # Создаем новый event loop для инициализации
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        loop.run_until_complete(analytics.init_database())
+        logger.info("Analytics database initialized successfully")
+        # НЕ закрываем loop, оставляем для telegram-bot
+    except Exception as e:
+        logger.error(f"Failed to initialize analytics database: {e}")
+
 def main():
+    # Инициализируем аналитику
+    init_analytics_sync()
+    
     app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
@@ -149,7 +180,21 @@ def main():
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
     print("Бот запущен...")
-    app.run_polling()
+    try:
+        app.run_polling()
+    except KeyboardInterrupt:
+        logger.info("Bot stopped by user")
+    finally:
+        # Graceful shutdown
+        try:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                loop.run_until_complete(analytics.close())
+            finally:
+                loop.close()
+        except Exception as e:
+            logger.error(f"Error closing analytics: {e}")
 
 if __name__ == "__main__":
     main()

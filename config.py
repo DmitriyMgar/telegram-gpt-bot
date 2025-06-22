@@ -16,3 +16,6 @@ CHANNEL_ID = os.getenv("CHANNEL_ID", "@logloss_notes")  # ID канала по �
 REDIS_HOST = os.getenv("REDIS_HOST")
 REDIS_PORT = int(os.getenv("REDIS_PORT"))
 REDIS_DB = int(os.getenv("REDIS_DB"))
+
+# Настройки для аналитики пользователей
+ANALYTICS_DB_PATH = os.getenv("ANALYTICS_DB_PATH", "./data/user_analytics.db")
