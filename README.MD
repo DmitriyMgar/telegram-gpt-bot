@@ -21,12 +21,13 @@ It uses Redis for persistent thread management, supports async processing, centr
 ## 🧱 Project Structure
 
 ```
-mygpt_bot/
+telegram-gpt-bot/
 ├── main.py                # Bot entry point (Telegram handlers)
-├── config.py              # Tokens, Redis, whitelist, .env loader
+├── config.py              # Tokens, Redis, channel config, .env loader
 ├── logger.py              # Logging setup
 ├── openai_handler.py      # Assistants API logic (async)
 ├── session_manager.py     # Redis session management (user <-> thread_id)
+├── subscription_checker.py # Channel subscription verification (async)
 ├── .env                   # Secret tokens and config
 ├── bot.log                # Log file
 ```
@@ -45,6 +46,9 @@ OPENAI_ASSISTANT_ID=asst_abc123456789
 REDIS_HOST=localhost
 REDIS_PORT=6379
 REDIS_DB=0
+
+# Channel for subscription verification (required)
+CHANNEL_ID=@logloss_notes
 ```
 
 These are automatically loaded via `config.py`.
@@ -53,25 +57,32 @@ These are automatically loaded via `config.py`.
 
 ## 🔒 Access Control
 
-Define allowed users in `config.py`:
+The bot now uses **channel subscription verification** instead of a static user list.
 
-```python
-ALLOWED_USERS = [
-    123456789,  # your Telegram user ID
-    987654321,
-]
-```
+### Channel Setup:
+1. The bot must be an **administrator** of the `@logloss_notes` channel
+2. Set the `CHANNEL_ID` variable in your `.env` file
+3. Only channel subscribers can use the bot
 
-Only users in this list can access the bot.
+### Access Statuses:
+- ✅ `creator` - channel creator
+- ✅ `administrator` - channel administrator  
+- ✅ `member` - channel member
+- ❌ `left` - left the channel
+- ❌ `kicked` - banned from channel
+
+### Caching:
+Subscription check results are cached in Redis for 10 minutes to optimize performance.
 
 ---
 
 ## 💬 Available Commands
 
-| Command    | Description                          |
-|------------|--------------------------------------|
-| `/start`   | Welcome message                      |
-| `/reset`   | Clears your conversation thread      |
+| Command      | Description                          |
+|--------------|--------------------------------------|
+| `/start`     | Welcome message                      |
+| `/reset`     | Clears your conversation thread      |
+| `/subscribe` | Check subscription status and help   |
 
 ---
 

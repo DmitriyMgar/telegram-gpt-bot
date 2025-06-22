@@ -7,9 +7,11 @@ TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 ASSISTANT_ID = os.getenv("OPENAI_ASSISTANT_ID")  # заранее созданный ассистент
 
-# Список разрешённых Telegram ID
-ALLOWED_USERS = [792501309, 916387745, 2120274462]  # Здесь укажите ID пользователей
+# Канал для проверки подписки
+CHANNEL_ID = os.getenv("CHANNEL_ID", "@logloss_notes")  # ID канала по умолчанию
 
+# Список разрешённых Telegram ID (резервный механизм)
+# ALLOWED_USERS = [792501309, 916387745, 2120274462]  # Закомментировано - теперь используем проверку подписки
 
 REDIS_HOST = os.getenv("REDIS_HOST")
 REDIS_PORT = int(os.getenv("REDIS_PORT"))
