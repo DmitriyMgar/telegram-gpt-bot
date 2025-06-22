@@ -3,16 +3,17 @@
 ## Project Overview
 
 **Project Name:** Telegram GPT Bot  
-**Version:** 1.1.0  
+**Version:** 1.3.0  
 **Language:** Python 3.8+  
 **Architecture:** Asynchronous, microservice-style modular design  
-**Primary Purpose:** Channel-subscription-gated Telegram bot with OpenAI Assistant integration
+**Primary Purpose:** Channel-subscription-gated Telegram bot with OpenAI Assistant integration and user analytics
 
 ### Core Functionality
 - **AI Chat Interface**: Users interact with OpenAI Assistant via Telegram
 - **Channel-Based Authorization**: Access control through Telegram channel subscription verification
 - **Persistent Conversations**: Redis-backed thread management for conversation continuity
 - **Export/History Features**: Chat history retrieval and export capabilities
+- **User Analytics System**: Comprehensive token usage tracking and reporting
 - **Caching System**: Intelligent Redis caching for subscription status optimization
 
 ---
@@ -33,17 +34,17 @@
                        │   (subscription) │
                        └──────────────────┘
                                 │
-                        ┌───────▼───────┐
-                        │     Redis     │
-                        │   (Cache &    │
-                        │   Sessions)   │
-                        └───────────────┘
+                        ┌───────▼───────┐    ┌─────────────────┐
+                        │     Redis     │    │   Analytics     │
+                        │   (Cache &    │    │   Database      │
+                        │   Sessions)   │    │   (SQLite)      │
+                        └───────────────┘    └─────────────────┘
 ```
 
 ### Component Architecture
 1. **Presentation Layer**: Telegram Bot API handlers (`main.py`)
-2. **Business Logic Layer**: Authorization, session management, message processing
-3. **Data Access Layer**: Redis for caching and session storage
+2. **Business Logic Layer**: Authorization, session management, message processing, analytics
+3. **Data Access Layer**: Redis for caching and sessions, SQLite for analytics
 4. **External API Layer**: OpenAI Assistant API, Telegram Bot API
 5. **Infrastructure Layer**: Logging, configuration, error handling
 
@@ -59,10 +60,14 @@ telegram-gpt-bot/
 ├── openai_handler.py          # OpenAI Assistant API integration
 ├── session_manager.py         # Redis session management
 ├── subscription_checker.py    # Channel subscription verification
+├── user_analytics.py          # User analytics and token usage tracking
+├── view_analytics.py          # Analytics viewing tool
 ├── requirements.txt           # Python dependencies
 ├── README.MD                  # Project documentation
 ├── .env                       # Environment variables (not tracked)
 ├── bot.log                    # Application logs
+├── data/                      # Data storage directory
+│   └── user_analytics.db      # SQLite analytics database
 ├── docs/                      # Documentation directory
 │   ├── project-index.md       # This file
 │   ├── progress.md            # Changelog & version history
@@ -108,10 +113,11 @@ telegram-gpt-bot/
   - Creates new OpenAI conversation thread
   - Returns thread_id for session tracking
 
-- `send_message_and_get_response(user_id: int, message: str) -> str`
+- `send_message_and_get_response(user_id: int, message: str, username: str = None) -> str`
   - Core message processing function
   - Manages thread creation/retrieval
   - Handles assistant run execution
+  - Tracks token usage for analytics
   - Returns AI response
 
 - `get_message_history(user_id: int, limit: int = 10) -> str`
@@ -192,6 +198,7 @@ CHANNEL_ID            # Target channel for subscription (@logloss_notes)
 REDIS_HOST            # Redis server hostname
 REDIS_PORT            # Redis server port
 REDIS_DB              # Redis database number
+ANALYTICS_DB_PATH     # SQLite analytics database path
 ```
 
 ### 6. logger.py - Logging Infrastructure
@@ -202,6 +209,70 @@ REDIS_DB              # Redis database number
 - **Format**: `%(asctime)s [%(levelname)s] %(name)s: %(message)s`
 - **Outputs**: File (`bot.log`) + Console (stdout)
 - **Encoding**: UTF-8
+
+### 7. user_analytics.py - User Analytics System
+**Purpose**: Comprehensive user analytics and token usage tracking
+
+#### Key Functions:
+- `UserAnalytics.__init__(db_path: str = None)`
+  - Initialize analytics with SQLite database path
+  - Auto-creates database directory if needed
+
+- `async init_database() -> None`
+  - Creates analytics table and performance indexes
+  - Called automatically during bot startup
+
+- `async record_usage(user_id: int, username: str, tokens_used: int) -> None`
+  - Records token consumption for user and date
+  - Validates input data and handles errors gracefully
+  - Called automatically after each OpenAI API request
+
+- `async get_user_daily_usage(user_id: int, date: str) -> int`
+  - Returns total tokens used by user on specific date
+
+- `async get_user_total_usage(user_id: int) -> int`
+  - Returns total tokens used by user across all time
+
+- `async get_all_users_usage_by_date(date: str) -> List[Dict]`
+  - Returns usage statistics for all users on specific date
+
+- `async get_user_usage_stats(user_id: int, days: int = 7) -> Dict`
+  - Returns detailed usage statistics for user over specified period
+
+#### Database Schema:
+```sql
+CREATE TABLE user_analytics (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    username TEXT,
+    request_date DATE NOT NULL,
+    tokens_used INTEGER NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+```
+
+#### Performance Features:
+- **Async Operations**: Non-blocking database operations
+- **Indexed Queries**: Optimized for user_id and date lookups
+- **Error Resilience**: Bot continues working if analytics fails
+- **Data Validation**: Input sanitization and bounds checking
+
+### 8. view_analytics.py - Analytics Viewing Tool
+**Purpose**: Command-line tool for viewing and analyzing user data
+
+#### Usage Modes:
+- `python view_analytics.py` - Show all analytics data
+- `python view_analytics.py users` - User statistics only
+- `python view_analytics.py daily` - Daily statistics only
+- `python view_analytics.py info` - Database information only
+- `python view_analytics.py help` - Command help
+
+#### Features:
+- **Formatted Output**: Clean table layouts with proper alignment
+- **Multiple Views**: Raw data, user summaries, daily aggregations
+- **Database Info**: File size, record counts, date ranges
+- **Error Handling**: Graceful handling of database issues
+- **Direct SQL Access**: Alternative to Python interface
 
 ---
 
@@ -214,6 +285,7 @@ openai==1.64.0                  # OpenAI API client (async)
 redis==5.2.1                    # Redis client
 python-dotenv==1.0.1            # Environment variable loader
 aiohttp==3.10.11                # Async HTTP client
+aiosqlite==0.20.0               # Async SQLite driver for analytics
 ```
 
 ### External Services
@@ -226,11 +298,17 @@ aiohttp==3.10.11                # Async HTTP client
    - AI conversation management
    - Thread-based conversation persistence
    - Message history and retrieval
+   - Token usage reporting
 
 3. **Redis Database**
    - Session storage (thread_id mapping)
    - Subscription status caching
    - Performance optimization
+
+4. **SQLite Database**
+   - User analytics and token usage tracking
+   - Daily usage aggregation
+   - Historical data storage
 
 ---
 
@@ -252,6 +330,33 @@ Key: subscription:{user_id}
 Value: "true" | "false"
 TTL: 600 seconds (10 minutes)
 Example: subscription:123456789 → "true"
+```
+
+### SQLite Analytics Database
+
+#### User Analytics Table
+```sql
+CREATE TABLE user_analytics (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    username TEXT,
+    request_date DATE NOT NULL,
+    tokens_used INTEGER NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Performance indexes
+CREATE INDEX idx_user_analytics_user_id ON user_analytics(user_id);
+CREATE INDEX idx_user_analytics_date ON user_analytics(request_date);
+CREATE INDEX idx_user_analytics_user_date ON user_analytics(user_id, request_date);
+```
+
+#### Data Examples
+```
+id | user_id   | username  | request_date | tokens_used | created_at
+1  | 123456789 | john_doe  | 2025-06-22  | 150         | 2025-06-22 16:03:27
+2  | 987654321 | jane_doe  | 2025-06-22  | 89          | 2025-06-22 16:05:12
+3  | 123456789 | john_doe  | 2025-06-22  | 203         | 2025-06-22 16:12:45
 ```
 
 ---
@@ -333,6 +438,7 @@ CHANNEL_ID=@logloss_notes
 REDIS_HOST=localhost
 REDIS_PORT=6379
 REDIS_DB=0
+ANALYTICS_DB_PATH=./data/user_analytics.db
 ```
 
 ### System Requirements
@@ -371,6 +477,9 @@ WantedBy=multi-user.target
 - **API Error Rates**: OpenAI and Telegram API failures
 - **User Activity**: Command usage and conversation volume
 - **Authorization Success**: Channel subscription verification rates
+- **Token Usage**: Daily and total OpenAI API token consumption
+- **Analytics Database**: Record counts, growth rate, storage size
+- **User Engagement**: Active users per day, usage patterns
 
 ### Log Analysis
 - Monitor `bot.log` for error patterns
@@ -403,6 +512,6 @@ WantedBy=multi-user.target
 
 ---
 
-**Last Updated**: June 22, 2025, 11:51 UTC  
-**Document Version**: 1.0  
-**Project Version**: 1.1.0 
+**Last Updated**: June 22, 2025, 16:03 MSK  
+**Document Version**: 1.1  
+**Project Version**: 1.3.0 

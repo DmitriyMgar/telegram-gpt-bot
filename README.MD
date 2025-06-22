@@ -10,8 +10,10 @@ It uses Redis for persistent thread management, supports async processing, centr
 - ✅ Chat with OpenAI Assistant (Assistants API)
 - ✅ Fully asynchronous processing (`asyncio`)
 - ✅ Redis-based conversation history per user (`thread_id`)
+- ✅ Channel subscription-based access control
+- ✅ **User Analytics System** - Token usage tracking and reporting
 - ✅ `/reset` command to start a new thread
-- ✅ Access whitelist (by Telegram user ID)
+- ✅ `/history` and `/export` commands for conversation management
 - ✅ Centralized logging to `bot.log`
 - ✅ Runs as a `systemd` service on Linux
 - ✅ Modular project structure for easy extension
@@ -22,14 +24,18 @@ It uses Redis for persistent thread management, supports async processing, centr
 
 ```
 telegram-gpt-bot/
-├── main.py                # Bot entry point (Telegram handlers)
-├── config.py              # Tokens, Redis, channel config, .env loader
-├── logger.py              # Logging setup
-├── openai_handler.py      # Assistants API logic (async)
-├── session_manager.py     # Redis session management (user <-> thread_id)
-├── subscription_checker.py # Channel subscription verification (async)
-├── .env                   # Secret tokens and config
-├── bot.log                # Log file
+├── main.py                  # Bot entry point (Telegram handlers)
+├── config.py                # Tokens, Redis, channel config, .env loader
+├── logger.py                # Logging setup
+├── openai_handler.py        # Assistants API logic (async)
+├── session_manager.py       # Redis session management (user <-> thread_id)
+├── subscription_checker.py  # Channel subscription verification (async)
+├── user_analytics.py        # User analytics and token usage tracking
+├── view_analytics.py        # Analytics viewing tool
+├── data/
+│   └── user_analytics.db    # SQLite database for analytics
+├── .env                     # Secret tokens and config
+├── bot.log                  # Log file
 ```
 
 ---
@@ -49,6 +55,9 @@ REDIS_DB=0
 
 # Channel for subscription verification (required)
 CHANNEL_ID=@logloss_notes
+
+# Analytics database path (optional)
+ANALYTICS_DB_PATH=./data/user_analytics.db
 ```
 
 These are automatically loaded via `config.py`.
@@ -82,6 +91,8 @@ Subscription check results are cached in Redis for 10 minutes to optimize perfor
 |--------------|--------------------------------------|
 | `/start`     | Welcome message                      |
 | `/reset`     | Clears your conversation thread      |
+| `/history`   | Shows recent conversation history    |
+| `/export`    | Exports conversation as text file    |
 | `/subscribe` | Check subscription status and help   |
 
 ---
@@ -93,6 +104,74 @@ Subscription check results are cached in Redis for 10 minutes to optimize perfor
 - Replies are filtered by `created_at` to avoid duplicates.
 - Redis stores `thread_id` per user for persistence across restarts.
 - The entire flow is asynchronous using `openai.AsyncOpenAI` and `asyncio`.
+
+---
+
+## 📊 User Analytics System
+
+The bot includes a comprehensive analytics system that tracks OpenAI API token usage per user and date, helping you monitor costs and usage patterns.
+
+### 🎯 What's Tracked
+
+- **User ID**: Telegram user identifier
+- **Username**: User's display name or handle
+- **Request Date**: Daily aggregation of usage
+- **Tokens Used**: OpenAI API token consumption per request
+- **No Message Content**: Only metadata is stored for privacy
+
+### 📈 Analytics Features
+
+- **Daily Usage Tracking**: Monitor token consumption by date
+- **User Statistics**: Track individual user usage patterns
+- **Automatic Collection**: Seamless integration with bot operations
+- **SQLite Database**: Lightweight, file-based storage
+- **Performance Optimized**: Indexed queries for fast reporting
+
+### 🔍 Viewing Analytics
+
+#### Using the Analytics Tool:
+```bash
+# Activate virtual environment
+source venv/bin/activate
+
+# View all analytics data
+python view_analytics.py
+
+# View user statistics only
+python view_analytics.py users
+
+# View daily statistics
+python view_analytics.py daily
+
+# View database info
+python view_analytics.py info
+
+# Show help
+python view_analytics.py help
+```
+
+#### Direct SQL Access:
+```bash
+# Access database directly
+sqlite3 data/user_analytics.db
+
+# Example queries:
+SELECT * FROM user_analytics ORDER BY created_at DESC LIMIT 10;
+SELECT user_id, username, SUM(tokens_used) FROM user_analytics GROUP BY user_id;
+```
+
+### 🗃️ Database Schema
+
+```sql
+CREATE TABLE user_analytics (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    username TEXT,
+    request_date DATE NOT NULL,
+    tokens_used INTEGER NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+```
 
 ---
 
