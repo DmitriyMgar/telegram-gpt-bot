@@ -3,13 +3,14 @@
 ## Project Overview
 
 **Project Name:** Telegram GPT Bot  
-**Version:** 1.3.0  
+**Version:** 1.4.0  
 **Language:** Python 3.8+  
 **Architecture:** Asynchronous, microservice-style modular design  
-**Primary Purpose:** Channel-subscription-gated Telegram bot with OpenAI Assistant integration and user analytics
+**Primary Purpose:** Channel-subscription-gated Telegram bot with OpenAI Assistant integration, user analytics, and image processing
 
 ### Core Functionality
 - **AI Chat Interface**: Users interact with OpenAI Assistant via Telegram
+- **Image Processing**: Support for image uploads with OpenAI Vision API integration
 - **Channel-Based Authorization**: Access control through Telegram channel subscription verification
 - **Persistent Conversations**: Redis-backed thread management for conversation continuity
 - **Export/History Features**: Chat history retrieval and export capabilities
@@ -43,10 +44,10 @@
 
 ### Component Architecture
 1. **Presentation Layer**: Telegram Bot API handlers (`main.py`)
-2. **Business Logic Layer**: Authorization, session management, message processing, analytics
-3. **Data Access Layer**: Redis for caching and sessions, SQLite for analytics
-4. **External API Layer**: OpenAI Assistant API, Telegram Bot API
-5. **Infrastructure Layer**: Logging, configuration, error handling
+2. **Business Logic Layer**: Authorization, session management, message processing, image processing, analytics
+3. **Data Access Layer**: Redis for caching and sessions, SQLite for analytics, temporary file storage
+4. **External API Layer**: OpenAI Assistant API (text & vision), Telegram Bot API, OpenAI File API
+5. **Infrastructure Layer**: Logging, configuration, error handling, file management
 
 ---
 
@@ -91,7 +92,8 @@ telegram-gpt-bot/
 
 - `start(update, context)` - Welcome handler with authorization
 - `reset(update, context)` - Clear conversation thread
-- `handle_message(update, context)` - Process user messages
+- `handle_message(update, context)` - Process user text messages
+- `handle_photo(update, context)` - Process user image uploads
 - `history(update, context)` - Retrieve conversation history
 - `export(update, context)` - Export chat history as file
 - `subscribe(update, context)` - Check subscription status
@@ -104,6 +106,12 @@ telegram-gpt-bot/
 | `/history`   | Show recent conversation history         | Yes                    |
 | `/export`    | Export conversation as text file         | Yes                    |
 | `/subscribe` | Check subscription status & instructions | No                     |
+
+#### Message Handling:
+| Input Type   | Description                              | Supported Formats      |
+|--------------|------------------------------------------|------------------------|
+| Text         | Regular chat messages                    | All text formats       |
+| Images       | Image analysis with optional captions    | JPEG, PNG, WebP (≤20MB)|
 
 ### 2. openai_handler.py - OpenAI Integration
 **Purpose**: Manages OpenAI Assistant API interactions
@@ -128,13 +136,23 @@ telegram-gpt-bot/
   - Creates temporary file with conversation export
   - Returns file path for download
 
+- `send_image_and_get_response(user_id: int, image_path: str, caption: str = "", username: str = None) -> str`
+  - Process images with OpenAI Vision API through Assistants
+  - Uploads image to OpenAI storage with `purpose="vision"`
+  - Uses proper `image_file` content type with `file_id` reference
+  - Includes automatic file cleanup to prevent quota issues
+  - Supports optional text captions alongside images
+  - Integrates with token usage analytics
+
 #### OpenAI API Flow:
 1. Get/Create thread for user
-2. Add user message to thread
-3. Create and execute run
-4. Poll for completion
-5. Retrieve and filter assistant responses
-6. Return formatted response
+2. Add user message to thread (text or image+text)
+3. For images: Upload to OpenAI storage and reference by file_id
+4. Create and execute run
+5. Poll for completion
+6. Retrieve and filter assistant responses
+7. Clean up uploaded files (images only)
+8. Return formatted response
 
 ### 3. session_manager.py - Redis Session Management
 **Purpose**: Persistent storage for user conversation threads
@@ -293,12 +311,15 @@ aiosqlite==0.20.0               # Async SQLite driver for analytics
    - Bot messaging and command handling
    - Channel membership verification
    - File upload/download capabilities
+   - Image file processing and temporary storage
 
 2. **OpenAI Assistants API**
    - AI conversation management
    - Thread-based conversation persistence
    - Message history and retrieval
    - Token usage reporting
+   - Vision API integration for image analysis
+   - File storage and management with automatic cleanup
 
 3. **Redis Database**
    - Session storage (thread_id mapping)
@@ -368,13 +389,17 @@ id | user_id   | username  | request_date | tokens_used | created_at
 - `POST /bot{token}/sendDocument` - Send files
 - `POST /bot{token}/sendChatAction` - Typing indicators
 - `GET /bot{token}/getChatMember` - Check channel membership
+- `GET /bot{token}/getFile` - Get file info for downloads
+- File download via HTTPS - Download user-uploaded images
 
 ### OpenAI Assistants API Endpoints Used
 - `POST /v1/threads` - Create conversation threads
-- `POST /v1/threads/{thread_id}/messages` - Add messages
+- `POST /v1/threads/{thread_id}/messages` - Add messages (text and images)
 - `POST /v1/threads/{thread_id}/runs` - Execute assistant runs
 - `GET /v1/threads/{thread_id}/runs/{run_id}` - Check run status
 - `GET /v1/threads/{thread_id}/messages` - Retrieve messages
+- `POST /v1/files` - Upload image files with `purpose="vision"`
+- `DELETE /v1/files/{file_id}` - Clean up uploaded files
 
 ---
 
@@ -480,6 +505,8 @@ WantedBy=multi-user.target
 - **Token Usage**: Daily and total OpenAI API token consumption
 - **Analytics Database**: Record counts, growth rate, storage size
 - **User Engagement**: Active users per day, usage patterns
+- **Image Processing**: Upload success rates, file sizes, format distribution
+- **File Storage**: OpenAI storage usage, cleanup success rates
 
 ### Log Analysis
 - Monitor `bot.log` for error patterns
@@ -503,6 +530,8 @@ WantedBy=multi-user.target
 3. **Network Failures**: Graceful degradation and error messages
 4. **Redis Downtime**: Bot continues with reduced functionality
 5. **OpenAI API Issues**: User-friendly error responses
+6. **Image Processing**: Various formats, sizes, upload failures
+7. **File Storage**: OpenAI storage limits, cleanup verification
 
 ### Extension Points
 - **Multiple Channels**: Extend subscription_checker for multi-channel support
@@ -512,6 +541,6 @@ WantedBy=multi-user.target
 
 ---
 
-**Last Updated**: June 22, 2025, 16:03 MSK  
-**Document Version**: 1.1  
-**Project Version**: 1.3.0 
+**Last Updated**: June 27, 2025, 14:50 UTC  
+**Document Version**: 1.2  
+**Project Version**: 1.4.0 

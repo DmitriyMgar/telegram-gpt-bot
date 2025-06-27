@@ -1,11 +1,13 @@
 from logger import logger
 import os
 import asyncio
+import tempfile
+from pathlib import Path
 
 from telegram import Update, BotCommand
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
 from config import TELEGRAM_BOT_TOKEN, CHANNEL_ID
-from openai_handler import send_message_and_get_response, get_message_history, export_message_history
+from openai_handler import send_message_and_get_response, get_message_history, export_message_history, send_image_and_get_response
 from session_manager import reset_thread
 from telegram.constants import ChatAction
 from subscription_checker import check_channel_subscription
@@ -55,6 +57,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "• 🤖 Продвинутое общение с искусственным интеллектом\n"
             "• 💾 Сохранение истории всех ваших диалогов\n"
             "• 🧠 Понимание контекста и ведение осмысленных бесед\n"
+            "• 🖼️ Анализ и обработка изображений\n"
             "• 📁 Экспорт переписки в удобном формате\n\n"
             "**Для получения доступа:**\n"
             "1️⃣ Подпишитесь на канал: https://t.me/logloss_notes\n"
@@ -71,14 +74,16 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• 💬 **Умные диалоги** - понимаю контекст и веду осмысленные беседы\n"
         "• 🧠 **Память** - помню всю нашу историю общения\n"
         "• 📚 **Непрерывность** - наш диалог продолжится даже после перерывов\n"
+        "• 🖼️ **Анализ изображений** - могу анализировать и описывать картинки\n"
         "• 📁 **Сохранение** - можете экспортировать любую беседу\n\n"
         "**Как пользоваться:**\n"
-        "• Просто напишите мне любое сообщение\n"
+        "• Напишите мне любое текстовое сообщение\n"
+        "• Отправьте изображение с подписью или без\n"
         "• `/reset` - начать новую беседу с чистого листа\n"
         "• `/history` - посмотреть последние сообщения\n"
         "• `/export` - скачать всю историю общения\n"
         "• `/subscribe` - проверить статус доступа\n\n"
-        "Готов помочь с любыми вопросами! Начните просто написав мне сообщение 🚀"
+        "Готов помочь с любыми вопросами! Начните просто написав мне сообщение или отправив изображение 🚀"
     )
 
 async def reset(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -113,6 +118,70 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     reply = await send_message_and_get_response(user_id, user_message, username)
     await update.message.reply_text(reply)
+
+async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle photo messages with optional caption"""
+    user_id = update.effective_user.id
+    if not await is_authorized_async(user_id):
+        await update.message.reply_text(
+            "🚫 Доступ к боту ограничен!\n\n"
+            "Для использования бота необходимо подписаться на канал:\n"
+            "👉 https://t.me/logloss_notes\n\n"
+            "После подписки попробуйте снова."
+        )
+        return
+    
+    username = get_username(update)
+    caption = update.message.caption or ""
+    
+    await update.message.chat.send_action(action="typing")
+    logger.info(f"Photo message from {user_id} (@{username}) with caption: {caption}")
+    
+    try:
+        # Get the largest photo size
+        photo = update.message.photo[-1]
+        
+        # Check file size (max 20MB as per Telegram limit)
+        if photo.file_size > 20 * 1024 * 1024:
+            await update.message.reply_text(
+                "🚫 Файл слишком большой. Максимальный размер изображения: 20MB"
+            )
+            return
+        
+        # Get file info
+        file = await context.bot.get_file(photo.file_id)
+        
+        # Create temporary file
+        temp_dir = Path(tempfile.gettempdir()) / "telegram_bot_images"
+        temp_dir.mkdir(exist_ok=True)
+        
+        # Generate unique filename
+        file_extension = Path(file.file_path).suffix.lower()
+        if file_extension not in ['.jpg', '.jpeg', '.png', '.webp']:
+            await update.message.reply_text(
+                "🚫 Поддерживаются только форматы: JPEG, PNG, WebP"
+            )
+            return
+        
+        temp_file_path = temp_dir / f"image_{user_id}_{photo.file_unique_id}{file_extension}"
+        
+        # Download image using Telegram Bot API
+        await file.download_to_drive(temp_file_path)
+        
+        # Process image with OpenAI
+        reply = await send_image_and_get_response(user_id, str(temp_file_path), caption, username)
+        await update.message.reply_text(reply)
+        
+    except Exception as e:
+        logger.error(f"Error processing photo from user {user_id}: {e}")
+        await update.message.reply_text("❌ Произошла ошибка при обработке изображения")
+    finally:
+        # Cleanup temporary file
+        try:
+            if 'temp_file_path' in locals() and temp_file_path.exists():
+                temp_file_path.unlink()
+        except Exception as e:
+            logger.error(f"Error cleaning up temp file: {e}")
 
 async def history(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -165,7 +234,8 @@ async def subscribe(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "• 🤖 Неограниченное общение с AI-ассистентом\n"
             "• 🧠 Бот помнит контекст всей беседы\n"
             "• 💾 История диалогов сохраняется автоматически\n"
-            "• 📁 Экспорт переписки в любой момент\n\n"
+            "• 📁 Экспорт переписки в любой момент\n"
+            "• 🖼️ Поддержка изображений\n\n"
             "**Команды для управления:**\n"
             "• `/reset` - начать новую беседу с чистого листа\n"
             "• `/history` - посмотреть последние 10 сообщений\n"
@@ -181,6 +251,7 @@ async def subscribe(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "• 💬 Естественные диалоги с пониманием контекста\n"
             "• 📚 Непрерывные беседы - бот помнит всю историю\n"
             "• 📁 Возможность экспорта переписки\n"
+            "• 🖼️ Поддержка изображений\n"
             "• 🔄 Сессии работают даже после перезапуска\n\n"
             "**Простые шаги для активации:**\n"
             "1️⃣ Перейдите по ссылке: https://t.me/logloss_notes\n"
@@ -231,6 +302,7 @@ def main():
     app.add_handler(CommandHandler("history", history))
     app.add_handler(CommandHandler("export", export))
     app.add_handler(CommandHandler("subscribe", subscribe))
+    app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
     print("Бот запущен...")
