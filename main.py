@@ -3,6 +3,8 @@ import os
 import asyncio
 import tempfile
 from pathlib import Path
+import logging
+import re
 
 from telegram import Update, BotCommand
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
@@ -127,8 +129,34 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.chat.send_action(action="typing")
     logger.info(f"Message from {user_id} (@{username}): {user_message}")
 
-    reply = await send_message_and_get_response(user_id, user_message, username)
-    await update.message.reply_text(reply)
+    # Отправляем сообщение о том, что запрос обрабатывается
+    processing_message = await update.message.reply_text(
+        "🤖 Ваш запрос передан в <b>ChatGPT</b> и обрабатывается...",
+        parse_mode='HTML'
+    )
+
+    try:
+        reply = await send_message_and_get_response(user_id, user_message, username)
+        
+        # Конвертируем Markdown в HTML для красивого отображения
+        formatted_reply = markdown_to_html(reply)
+        
+        # Заменяем сообщение о обработке на ответ
+        try:
+            await processing_message.edit_text(formatted_reply, parse_mode='HTML')
+        except Exception as e:
+            # Если не удалось отредактировать (например, сообщение слишком длинное),
+            # отправляем новое сообщение с ответом
+            logger.warning(f"Failed to edit processing message: {e}")
+            await update.message.reply_text(formatted_reply, parse_mode='HTML')
+            
+    except Exception as e:
+        logger.error(f"Error processing message from user {user_id}: {e}")
+        # Заменяем сообщение о обработке на сообщение об ошибке
+        try:
+            await processing_message.edit_text("❌ Произошла ошибка при обработке запроса. Попробуйте еще раз.")
+        except:
+            await update.message.reply_text("❌ Произошла ошибка при обработке запроса. Попробуйте еще раз.")
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle photo messages with optional caption"""
@@ -179,13 +207,37 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Download image using Telegram Bot API
         await file.download_to_drive(temp_file_path)
         
+        # Отправляем сообщение о том, что изображение обрабатывается
+        processing_message = await update.message.reply_text(
+            "🖼️ Ваше изображение передано в <b>ChatGPT</b> для анализа...",
+            parse_mode='HTML'
+        )
+        
         # Process image with OpenAI
         reply = await send_image_and_get_response(user_id, str(temp_file_path), caption, username)
-        await update.message.reply_text(reply)
+        
+        # Конвертируем Markdown в HTML для красивого отображения
+        formatted_reply = markdown_to_html(reply)
+        
+        # Заменяем сообщение о обработке на ответ
+        try:
+            await processing_message.edit_text(formatted_reply, parse_mode='HTML')
+        except Exception as e:
+            # Если не удалось отредактировать (например, сообщение слишком длинное),
+            # отправляем новое сообщение с ответом
+            logger.warning(f"Failed to edit processing message for image: {e}")
+            await update.message.reply_text(formatted_reply, parse_mode='HTML')
         
     except Exception as e:
         logger.error(f"Error processing photo from user {user_id}: {e}")
-        await update.message.reply_text("❌ Произошла ошибка при обработке изображения")
+        # Пытаемся отредактировать сообщение о обработке, если оно существует
+        if 'processing_message' in locals():
+            try:
+                await processing_message.edit_text("❌ Произошла ошибка при обработке изображения")
+            except:
+                await update.message.reply_text("❌ Произошла ошибка при обработке изображения")
+        else:
+            await update.message.reply_text("❌ Произошла ошибка при обработке изображения")
     finally:
         # Cleanup temporary file
         try:
@@ -207,7 +259,8 @@ async def history(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.chat.send_action(action="typing")
     reply = await get_message_history(user_id)
-    await update.message.reply_text(reply)
+    formatted_reply = markdown_to_html(reply)
+    await update.message.reply_text(formatted_reply, parse_mode='HTML')
 
 async def export(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -300,6 +353,39 @@ async def setup_bot_commands(bot):
         logger.info("Bot commands menu set successfully")
     except Exception as e:
         logger.error(f"Failed to set bot commands: {e}")
+
+def markdown_to_html(text):
+    """Конвертирует основные элементы Markdown в HTML для Telegram"""
+    # Экранируем HTML символы (кроме тех, что мы сами добавим)
+    text = text.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+    
+    # Блоки кода (```code```) - обрабатываем до одиночных `
+    text = re.sub(r'```(.+?)```', r'<pre>\1</pre>', text, flags=re.DOTALL)
+    
+    # Заголовки - делаем их жирными с дополнительным отступом
+    text = re.sub(r'^### (.+)$', r'\n<b>\1</b>\n', text, flags=re.MULTILINE)
+    text = re.sub(r'^## (.+)$', r'\n<b>\1</b>\n', text, flags=re.MULTILINE) 
+    text = re.sub(r'^# (.+)$', r'\n<b>\1</b>\n', text, flags=re.MULTILINE)
+    
+    # Жирный текст
+    text = re.sub(r'\*\*(.+?)\*\*', r'<b>\1</b>', text)
+    text = re.sub(r'__(.+?)__', r'<b>\1</b>', text)
+    
+    # Курсив (только одиночные *, избегаем конфликта с жирным)
+    text = re.sub(r'(?<!\*)\*([^*]+?)\*(?!\*)', r'<i>\1</i>', text)
+    text = re.sub(r'(?<!_)_([^_]+?)_(?!_)', r'<i>\1</i>', text)
+    
+    # Одиночный код (после блоков кода)
+    text = re.sub(r'`([^`]+?)`', r'<code>\1</code>', text)
+    
+    # Списки - улучшенная обработка
+    text = re.sub(r'^[\s]*[-\*\+] (.+)$', r'• \1', text, flags=re.MULTILINE)
+    text = re.sub(r'^[\s]*\d+\. (.+)$', r'• \1', text, flags=re.MULTILINE)
+    
+    # Убираем лишние переносы строк
+    text = re.sub(r'\n{3,}', '\n\n', text)
+    
+    return text.strip()
 
 def main():
     # Инициализируем аналитику
