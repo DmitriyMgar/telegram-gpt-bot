@@ -41,7 +41,7 @@
 
 ### **Natural Language Generation**
 - Users can type: "нарисуй красивый закат" → Image generated
-- Users can type: "создай картинку собаки" → Image generated
+- Users can type: "создай картинку собаки" → Image generated  
 - Users can type: "draw a cat" → Image generated
 
 ### **Command-Based Generation**
@@ -60,12 +60,6 @@
 - 📊 Token-equivalent system: 400 tokens = $0.04
 - 📈 Integration with existing analytics infrastructure
 - 💾 All usage properly recorded and trackable
-
-### **Authorization & Security**
-- 🔒 Channel subscription requirement maintained
-- 👥 Per-user analytics and usage tracking
-- 🛡️ OpenAI content policy compliance
-- 📝 Comprehensive logging for debugging
 
 ---
 
@@ -141,4 +135,4 @@
 
 The DALL-E image generation feature is **COMPLETE** and **READY FOR PRODUCTION USE**. All core functionality has been implemented, tested, and verified. Users can now generate images using both natural language and explicit commands!
 
-**Next Steps**: Deploy to production or add advanced features (HD quality, different styles, etc.) as Phase 4-5 enhancements.
+**Next Steps**: Deploy to production or add advanced features (HD quality, different styles, etc.) as Phase 4-5 enhancements. 

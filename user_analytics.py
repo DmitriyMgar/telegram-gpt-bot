@@ -5,6 +5,19 @@ from typing import List, Optional, Dict, Any
 from logger import logger
 from config import ANALYTICS_DB_PATH
 
+# DALL-E 3 Pricing Constants
+DALLE_PRICING = {
+    "1024x1024": 0.040,      # Standard DALL-E 3
+    "1792x1024": 0.080,      # HD landscape
+    "1024x1792": 0.080,      # HD portrait
+}
+
+DALLE_TOKEN_EQUIVALENT = {
+    "1024x1024": 400,        # $0.04 = 400 "tokens"
+    "1792x1024": 800,        # $0.08 = 800 "tokens"  
+    "1024x1792": 800,        # $0.08 = 800 "tokens"
+}
+
 
 class UserAnalytics:
     """
@@ -233,6 +246,40 @@ class UserAnalytics:
         except Exception as e:
             logger.error(f"Error getting usage stats for user {user_id}: {e}")
             return {"user_id": user_id, "total_tokens": 0, "daily_usage": [], "days_analyzed": days}
+    
+    async def record_image_generation(self, user_id: int, username: str, 
+                                     size: str = "1024x1024", model: str = "dall-e-3") -> None:
+        """
+        Records image generation usage in analytics.
+        
+        Args:
+            user_id: Telegram user ID
+            username: Username or display name
+            size: Image size (e.g., "1024x1024")
+            model: AI model used for generation
+        """
+        cost = DALLE_PRICING.get(size, 0.040)
+        # Convert to "tokens" for consistency with existing system
+        equivalent_tokens = DALLE_TOKEN_EQUIVALENT.get(size, 400)
+        
+        await self.record_usage(user_id, username, equivalent_tokens)
+        
+        logger.info(f"Recorded image generation: user={user_id}, cost=${cost}, tokens={equivalent_tokens}")
+
+    async def get_user_image_stats(self, user_id: int, days: int = 7) -> Dict[str, Any]:
+        """
+        Returns image generation statistics for user.
+        
+        Args:
+            user_id: Telegram user ID
+            days: Number of days to analyze
+            
+        Returns:
+            Dictionary with user image generation statistics
+        """
+        # This could be enhanced to track specifically image vs text usage
+        # For now, we use the existing token-based system
+        return await self.get_user_usage_stats(user_id, days)
     
     async def close(self) -> None:
         """
