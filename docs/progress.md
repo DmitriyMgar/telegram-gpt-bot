@@ -1,5 +1,106 @@
 # Project Changelog & Progress Report
 
+## Version 1.5.0 - Context Management & File Lifecycle Fix
+**Date:** June 28, 2025  
+**Time:** 12:00 UTC  
+**Status:** ✅ COMPLETE - Sequential image processing fully resolved
+
+### Overview
+Successfully resolved critical context management issues preventing sequential image processing. Implemented user-controlled file cleanup system that eliminates broken file references while maintaining conversation continuity.
+
+## ✅ Completed Tasks
+
+### 1. Context Conflict Resolution (`session_manager.py`)
+- ✅ **Root Cause Identified**: OpenAI threads loading deleted file references from previous images
+- ✅ **File Tracking System**: Added Redis-based tracking with `user_files:{user_id}` sets
+- ✅ **Async Reset Function**: Enhanced `/reset` command to delete all user files from OpenAI storage
+- ✅ **Error Prevention**: Eliminated context loading errors for sequential images
+
+### 2. Enhanced File Management (`openai_handler.py`)
+- ✅ **File Registration**: Automatically track uploaded files in Redis upon creation
+- ✅ **Deferred Cleanup**: Removed immediate file deletion after image processing
+- ✅ **Context Preservation**: Files remain available for thread context continuity
+- ✅ **Debug Logging**: Enhanced logging for file lifecycle tracking
+
+### 3. User Experience Improvements (`main.py`)
+- ✅ **Async Reset Command**: Updated `/reset` to use async file cleanup
+- ✅ **Enhanced Feedback**: Clear user messaging: "🔄 История и файлы сброшены. Новая беседа начата!"
+- ✅ **User Control**: Explicit file management through familiar command interface
+
+### 4. Redis Schema Extension
+- ✅ **New Key Pattern**: `user_files:{user_id}` using Redis sets for file tracking
+- ✅ **Atomic Operations**: Safe concurrent access to file lists
+- ✅ **Cleanup Integration**: Seamless integration with existing session management
+
+## 🎯 Key Technical Changes
+
+### Before (Problematic Implementation):
+```python
+# Immediate file deletion caused context conflicts
+await client.files.delete(uploaded_file.id)
+# Thread retained references to deleted files → Error on next image
+```
+
+### After (Robust Implementation):
+```python
+# File tracking and deferred cleanup
+add_user_file(user_id, uploaded_file.id)  # Track in Redis
+# Files persist until user explicitly resets context
+await reset_thread(user_id)  # User-controlled cleanup
+```
+
+## 🚀 Features Delivered
+
+1. **Sequential Image Support**: Multiple images in same conversation work perfectly
+2. **Context Integrity**: No more broken file references in conversation threads
+3. **User-Controlled Storage**: `/reset` command manages both context and files
+4. **Error Elimination**: Resolved "Error while downloading..." issues completely
+5. **Backward Compatibility**: All existing functionality preserved and enhanced
+6. **Storage Optimization**: Files cleaned up when users choose to reset
+
+## 📋 Architecture Benefits
+
+- **Predictable Behavior**: Users understand when files are cleaned (on explicit reset)
+- **Error Prevention**: No more context loading failures
+- **Resource Efficiency**: Files accumulate but are managed on user demand
+- **Enhanced UX**: Clear feedback on reset operations
+- **Maintainability**: Clean separation of file lifecycle and conversation management
+
+## 📊 Quality Assurance Results
+
+- **Sequential Images**: ✅ Tested multiple images in succession - all work perfectly
+- **Context Loading**: ✅ Thread context loads without errors after file cleanup
+- **Reset Functionality**: ✅ All user files properly deleted from OpenAI storage
+- **Redis Integration**: ✅ File tracking operates reliably across sessions
+- **User Feedback**: ✅ Clear messaging on reset operations
+
+## 🔧 Technical Implementation
+
+### New Functions Added:
+```python
+# session_manager.py
+def add_user_file(user_id: int, file_id: str)
+def get_user_files(user_id: int) -> list[str]
+def clear_user_files(user_id: int)
+async def delete_user_files_from_openai(user_id: int)
+async def reset_thread(user_id: int)  # Enhanced with file cleanup
+```
+
+### Redis Schema:
+```
+user_files:792501309 = {"file-ABC123", "file-XYZ789", "file-DEF456"}
+thread_id:792501309 = "thread_abc123def"
+```
+
+### User Workflow:
+1. Upload image → File tracked in Redis
+2. Process with context preservation
+3. Multiple images work seamlessly
+4. `/reset` → All files deleted + fresh context
+5. Clean slate for new conversation
+
+---
+
 ## Version 1.4.0 - Image Support Implementation & OpenAI API Fix
 **Date:** June 27, 2025  
 **Time:** 14:50 UTC  

@@ -97,8 +97,8 @@ async def reset(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
     
-    reset_thread(user_id)
-    await update.message.reply_text("История сброшена.")
+    await reset_thread(user_id)
+    await update.message.reply_text("🔄 История и файлы сброшены. Новая беседа начата!")
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id

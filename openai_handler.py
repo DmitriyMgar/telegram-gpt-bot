@@ -1,6 +1,6 @@
 import asyncio
 from config import OPENAI_API_KEY, ASSISTANT_ID
-from session_manager import get_thread_id, set_thread_id
+from session_manager import get_thread_id, set_thread_id, add_user_file
 from logger import logger
 from openai import AsyncOpenAI
 import tempfile
@@ -125,6 +125,9 @@ async def send_image_and_get_response(user_id: int, image_path: str, caption: st
                 purpose="vision"
             )
         
+        # Сохраняем file_id в Redis для отслеживания
+        add_user_file(user_id, uploaded_file.id)
+        
         # Create message content with uploaded file
         message_content = [
             {
@@ -201,12 +204,8 @@ async def send_image_and_get_response(user_id: int, image_path: str, caption: st
                 reply = message.content[0].text.value
                 logger.info(f"[OpenAI] Image analysis reply to {user_id}: {reply[:100]}...")
                 
-                # Clean up the uploaded file to save storage
-                try:
-                    await client.files.delete(uploaded_file.id)
-                    logger.debug(f"Cleaned up uploaded file: {uploaded_file.id}")
-                except Exception as e:
-                    logger.warning(f"Failed to delete uploaded file {uploaded_file.id}: {e}")
+                # Файл НЕ удаляется сразу - будет удален при команде /reset
+                logger.debug(f"File {uploaded_file.id} stored for user {user_id}, will be cleaned on /reset")
                 
                 return reply
 
