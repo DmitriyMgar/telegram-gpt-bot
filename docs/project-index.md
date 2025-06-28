@@ -3,18 +3,20 @@
 ## Project Overview
 
 **Project Name:** Telegram GPT Bot  
-**Version:** 1.4.0  
+**Version:** 1.6.0  
 **Language:** Python 3.8+  
 **Architecture:** Asynchronous, microservice-style modular design  
-**Primary Purpose:** Channel-subscription-gated Telegram bot with OpenAI Assistant integration, user analytics, and image processing
+**Primary Purpose:** Channel-subscription-gated Telegram bot with OpenAI Assistant integration, DALL-E image generation, user analytics, and image processing
 
 ### Core Functionality
 - **AI Chat Interface**: Users interact with OpenAI Assistant via Telegram
+- **DALL-E Image Generation**: Text-to-image generation with natural language detection and explicit commands
 - **Image Processing**: Support for image uploads with OpenAI Vision API integration
 - **Channel-Based Authorization**: Access control through Telegram channel subscription verification
 - **Persistent Conversations**: Redis-backed thread management for conversation continuity
 - **Export/History Features**: Chat history retrieval and export capabilities
-- **User Analytics System**: Comprehensive token usage tracking and reporting
+- **User Analytics System**: Comprehensive token usage tracking and reporting for both text and image generation
+- **Cost Control**: Real-time cost tracking and transparent pricing for all AI operations
 - **Caching System**: Intelligent Redis caching for subscription status optimization
 
 ---
@@ -27,13 +29,13 @@
 │   Telegram      │◄──►│   Bot Core       │◄──►│   OpenAI        │
 │   Users         │    │   (main.py)      │    │   Assistant     │
 └─────────────────┘    └──────────────────┘    └─────────────────┘
-                                │
-                                ▼
-                       ┌──────────────────┐
-                       │   Authorization  │
-                       │   System         │
-                       │   (subscription) │
-                       └──────────────────┘
+                                │                       │
+                                ▼                       ▼
+                       ┌──────────────────┐    ┌─────────────────┐
+                       │   Authorization  │    │   DALL-E 3      │
+                       │   System         │    │   Images API    │
+                       │   (subscription) │    │                 │
+                       └──────────────────┘    └─────────────────┘
                                 │
                         ┌───────▼───────┐    ┌─────────────────┐
                         │     Redis     │    │   Analytics     │
@@ -44,10 +46,10 @@
 
 ### Component Architecture
 1. **Presentation Layer**: Telegram Bot API handlers (`main.py`)
-2. **Business Logic Layer**: Authorization, session management, message processing, image processing, analytics
+2. **Business Logic Layer**: Authorization, session management, message processing, image processing, image generation, analytics
 3. **Data Access Layer**: Redis for caching and sessions, SQLite for analytics, temporary file storage
-4. **External API Layer**: OpenAI Assistant API (text & vision), Telegram Bot API, OpenAI File API
-5. **Infrastructure Layer**: Logging, configuration, error handling, file management
+4. **External API Layer**: OpenAI Assistant API (text & vision), OpenAI Images API (DALL-E 3), Telegram Bot API, OpenAI File API
+5. **Infrastructure Layer**: Logging, configuration, error handling, file management, cost tracking
 
 ---
 
@@ -103,6 +105,7 @@ telegram-gpt-bot/
 |--------------|------------------------------------------|------------------------|
 | `/start`     | Welcome message & instructions           | Yes                    |
 | `/reset`     | Clear conversation thread                | Yes                    |
+| `/generate`  | Generate image with DALL-E 3            | Yes                    |
 | `/history`   | Show recent conversation history         | Yes                    |
 | `/export`    | Export conversation as text file         | Yes                    |
 | `/subscribe` | Check subscription status & instructions | No                     |
@@ -110,11 +113,12 @@ telegram-gpt-bot/
 #### Message Handling:
 | Input Type   | Description                              | Supported Formats      |
 |--------------|------------------------------------------|------------------------|
-| Text         | Regular chat messages                    | All text formats       |
+| Text         | Regular chat messages + image generation | All text formats       |
 | Images       | Image analysis with optional captions    | JPEG, PNG, WebP (≤20MB)|
+| Generation   | Natural language image generation        | "нарисуй", "draw", etc.|
 
 ### 2. openai_handler.py - OpenAI Integration
-**Purpose**: Manages OpenAI Assistant API interactions
+**Purpose**: Manages OpenAI Assistant API interactions and DALL-E image generation
 
 #### Key Functions:
 - `create_thread() -> str`
@@ -127,6 +131,18 @@ telegram-gpt-bot/
   - Handles assistant run execution
   - Tracks token usage for analytics
   - Returns AI response
+
+- `detect_image_generation_request(message: str) -> bool`
+  - Detects image generation requests using multilingual regex patterns
+  - Supports Russian ("нарисуй", "создай картинку") and English ("draw", "generate image")
+  - Returns True if message is requesting image generation
+
+- `generate_image_dalle(prompt: str, user_id: int, username: str = None, size: str = "1024x1024") -> tuple[str, int]`
+  - Core DALL-E 3 image generation function
+  - Integrates with OpenAI Images API
+  - Returns image URL and equivalent token cost
+  - Records usage in analytics system
+  - Handles all API errors with user-friendly messages
 
 - `get_message_history(user_id: int, limit: int = 10) -> str`
   - Retrieves formatted conversation history
@@ -146,13 +162,23 @@ telegram-gpt-bot/
 
 #### OpenAI API Flow:
 1. Get/Create thread for user
-2. Add user message to thread (text or image+text)
+2. Add user message to thread (text, image+text, or generation request)
 3. For images: Upload to OpenAI storage and reference by file_id
-4. Create and execute run
-5. Poll for completion
-6. Retrieve and filter assistant responses
-7. Clean up uploaded files (images only)
-8. Return formatted response
+4. For generation: Call DALL-E 3 Images API
+5. Create and execute run (for text/image analysis)
+6. Poll for completion
+7. Retrieve and filter responses
+8. Clean up uploaded files (images only)
+9. Record usage in analytics
+10. Return formatted response or generated image
+
+#### DALL-E 3 Integration:
+- **Model**: dall-e-3
+- **Standard Size**: 1024x1024 ($0.04)
+- **Quality**: Standard
+- **Style**: Vivid
+- **Error Handling**: Comprehensive API error mapping
+- **Cost Tracking**: Automatic analytics recording
 
 ### 3. session_manager.py - Redis Session Management
 **Purpose**: Persistent storage for user conversation threads
@@ -229,7 +255,22 @@ ANALYTICS_DB_PATH     # SQLite analytics database path
 - **Encoding**: UTF-8
 
 ### 7. user_analytics.py - User Analytics System
-**Purpose**: Comprehensive user analytics and token usage tracking
+**Purpose**: Comprehensive user analytics and token usage tracking for text and image generation
+
+#### DALL-E Pricing Constants:
+```python
+DALLE_PRICING = {
+    "1024x1024": 0.040,      # Standard DALL-E 3
+    "1792x1024": 0.080,      # HD landscape
+    "1024x1792": 0.080,      # HD portrait
+}
+
+DALLE_TOKEN_EQUIVALENT = {
+    "1024x1024": 400,        # $0.04 = 400 "tokens"
+    "1792x1024": 800,        # $0.08 = 800 "tokens"  
+    "1024x1792": 800,        # $0.08 = 800 "tokens"
+}
+```
 
 #### Key Functions:
 - `UserAnalytics.__init__(db_path: str = None)`
@@ -244,6 +285,12 @@ ANALYTICS_DB_PATH     # SQLite analytics database path
   - Records token consumption for user and date
   - Validates input data and handles errors gracefully
   - Called automatically after each OpenAI API request
+
+- `async record_image_generation(user_id: int, username: str, size: str = "1024x1024", model: str = "dall-e-3") -> None`
+  - Records image generation usage in analytics
+  - Converts DALL-E pricing to token equivalents
+  - Integrates with existing analytics infrastructure
+  - Provides detailed logging for cost tracking
 
 - `async get_user_daily_usage(user_id: int, date: str) -> int`
   - Returns total tokens used by user on specific date
@@ -269,11 +316,11 @@ CREATE TABLE user_analytics (
 );
 ```
 
-#### Performance Features:
-- **Async Operations**: Non-blocking database operations
-- **Indexed Queries**: Optimized for user_id and date lookups
-- **Error Resilience**: Bot continues working if analytics fails
-- **Data Validation**: Input sanitization and bounds checking
+#### Cost Control Features:
+- **Unified Token System**: Text and images tracked in consistent token equivalents
+- **Real-time Cost Calculation**: Immediate cost feedback to users
+- **Foundation for Limits**: Infrastructure ready for usage restrictions
+- **Transparent Pricing**: Clear cost display in all operations
 
 ### 8. view_analytics.py - Analytics Viewing Tool
 **Purpose**: Command-line tool for viewing and analyzing user data
@@ -503,16 +550,20 @@ WantedBy=multi-user.target
 - **User Activity**: Command usage and conversation volume
 - **Authorization Success**: Channel subscription verification rates
 - **Token Usage**: Daily and total OpenAI API token consumption
+- **Image Generation**: DALL-E usage, success rates, and cost tracking
 - **Analytics Database**: Record counts, growth rate, storage size
 - **User Engagement**: Active users per day, usage patterns
 - **Image Processing**: Upload success rates, file sizes, format distribution
 - **File Storage**: OpenAI storage usage, cleanup success rates
+- **Cost Control**: Daily/monthly spending trends, user cost distribution
 
 ### Log Analysis
 - Monitor `bot.log` for error patterns
 - Track subscription verification failures
 - Monitor Redis connection health
 - Watch for OpenAI API rate limiting
+- Track DALL-E generation success rates
+- Monitor cost trends and usage spikes
 
 ---
 
@@ -531,16 +582,22 @@ WantedBy=multi-user.target
 4. **Redis Downtime**: Bot continues with reduced functionality
 5. **OpenAI API Issues**: User-friendly error responses
 6. **Image Processing**: Various formats, sizes, upload failures
-7. **File Storage**: OpenAI storage limits, cleanup verification
+7. **Image Generation**: DALL-E requests, content policy violations, cost tracking
+8. **File Storage**: OpenAI storage limits, cleanup verification
+9. **Cost Tracking**: Analytics accuracy, usage limit scenarios
+10. **Multilingual Support**: Russian and English generation requests
 
 ### Extension Points
 - **Multiple Channels**: Extend subscription_checker for multi-channel support
 - **Role-based Access**: Different permissions based on channel role
 - **Custom Commands**: Add new command handlers in main.py
 - **Advanced Analytics**: Enhanced logging and metrics collection
+- **Cost Limits**: Daily/monthly usage restrictions per user
+- **Image Variations**: Multiple image sizes and quality options
+- **Advanced Generation**: Style presets, image editing, variations
 
 ---
 
-**Last Updated**: June 27, 2025, 14:50 UTC  
-**Document Version**: 1.2  
-**Project Version**: 1.4.0 
+**Last Updated**: December 28, 2024, 18:00 UTC  
+**Document Version**: 1.3  
+**Project Version**: 1.6.0 
