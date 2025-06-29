@@ -9,7 +9,7 @@ import re
 from telegram import Update, BotCommand
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
 from config import TELEGRAM_BOT_TOKEN, CHANNEL_ID
-from openai_handler import send_message_and_get_response, get_message_history, export_message_history, send_image_and_get_response, detect_image_generation_request, generate_image_dalle
+from openai_handler import send_message_and_get_response, get_message_history, export_message_history, send_image_and_get_response, detect_image_generation_request, generate_image_dalle, send_document_and_get_response
 from session_manager import reset_thread
 from telegram.constants import ChatAction
 from subscription_checker import check_channel_subscription
@@ -60,6 +60,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "• 💾 Сохранение истории всех ваших диалогов\n"
             "• 🧠 Понимание контекста и ведение осмысленных бесед\n"
             "• 🖼️ Анализ и обработка изображений\n"
+            "• 📄 Работа с документами (PDF, TXT, DOCX)\n"
             "• 📁 Экспорт переписки в удобном формате\n\n"
             "<b>Для получения доступа:</b>\n"
             "1️⃣ Подпишитесь на канал: https://t.me/logloss_notes\n"
@@ -82,11 +83,13 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• 🧠 <b>Память</b> - помню всю нашу историю общения\n"
         "• 📚 <b>Непрерывность</b> - наш диалог продолжится даже после перерывов\n"
         "• 🖼️ <b>Анализ изображений</b> - могу анализировать и описывать картинки\n"
+        "• 📄 <b>Работа с документами</b> - анализирую PDF, TXT, DOCX файлы\n"
         "• 🎨 <b>Генерация изображений</b> - создаю картинки по вашим описаниям\n"
         "• 📁 <b>Сохранение</b> - можете экспортировать любую беседу\n\n"
         "<b>Как пользоваться:</b>\n"
         "• Напишите мне любое текстовое сообщение\n"
         "• Отправьте изображение с подписью или без\n"
+        "• Прикрепите документ (PDF, TXT, DOCX) с вопросом или без\n"
         "• <code>/reset</code> - начать новую беседу с чистого листа\n"
         "• <code>/history</code> - посмотреть последние сообщения\n"
         "• <code>/export</code> - скачать всю историю общения\n"
@@ -150,15 +153,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Заменяем сообщение о обработке на ответ
         try:
             await processing_message.edit_text(formatted_reply, parse_mode='HTML')
-        except Exception as e:
-            # Если не удалось отредактировать (например, сообщение слишком длинное),
-            # отправляем новое сообщение с ответом
-            logger.warning(f"Failed to edit processing message: {e}")
+        except Exception as message_edit_error:
+            # If editing failed (e.g., message too long), send new message with reply
+            logger.warning(f"Failed to edit processing message: {message_edit_error}")
             await update.message.reply_text(formatted_reply, parse_mode='HTML')
             
-    except Exception as e:
-        logger.error(f"Error processing message from user {user_id}: {e}")
-        # Заменяем сообщение о обработке на сообщение об ошибке
+    except Exception as message_processing_error:
+        logger.error(f"Error processing message from user {user_id}: {message_processing_error}")
+        # Replace processing message with error message
         try:
             await processing_message.edit_text("❌ Произошла ошибка при обработке запроса. Попробуйте еще раз.")
         except:
@@ -234,9 +236,9 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             logger.warning(f"Failed to edit processing message for image: {e}")
             await update.message.reply_text(formatted_reply, parse_mode='HTML')
         
-    except Exception as e:
-        logger.error(f"Error processing photo from user {user_id}: {e}")
-        # Пытаемся отредактировать сообщение о обработке, если оно существует
+    except Exception as image_processing_error:
+        logger.error(f"Error processing photo from user {user_id}: {image_processing_error}")
+        # Try to edit processing message if it exists
         if 'processing_message' in locals():
             try:
                 await processing_message.edit_text("❌ Произошла ошибка при обработке изображения")
@@ -249,8 +251,137 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try:
             if 'temp_file_path' in locals() and temp_file_path.exists():
                 temp_file_path.unlink()
-        except Exception as e:
-            logger.error(f"Error cleaning up temp file: {e}")
+        except Exception as cleanup_error:
+            logger.error(f"Error cleaning up temp file: {cleanup_error}")
+
+async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle document messages (TXT, PDF, DOCX)"""
+    user_id = update.effective_user.id
+    if not await is_authorized_async(user_id):
+        await update.message.reply_text(
+            "🚫 Доступ к боту ограничен!\n\n"
+            "Для использования бота необходимо подписаться на канал:\n"
+            "👉 https://t.me/logloss_notes\n\n"
+            "После подписки попробуйте снова."
+        )
+        return
+    
+    username = get_username(update)
+    document = update.message.document
+    caption = update.message.caption or ""
+    
+    # Define allowed document types
+    ALLOWED_DOCUMENT_TYPES = {
+        "application/pdf": ".pdf",
+        "text/plain": ".txt", 
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ".docx"
+    }
+    
+    # Check file type
+    if document.mime_type not in ALLOWED_DOCUMENT_TYPES:
+        await update.message.reply_text(
+            "❌ <b>Неподдерживаемый тип файла</b>\n\n"
+            "Поддерживаемые форматы:\n"
+            "• 📄 <b>PDF</b> - документы PDF\n"
+            "• 📝 <b>TXT</b> - текстовые файлы\n"
+            "• 📄 <b>DOCX</b> - документы Word\n\n"
+            "Пожалуйста, отправьте файл одного из поддерживаемых форматов.",
+            parse_mode='HTML'
+        )
+        return
+    
+    # Check file extension as additional validation
+    file_extension = Path(document.file_name).suffix.lower() if document.file_name else ""
+    expected_extension = ALLOWED_DOCUMENT_TYPES[document.mime_type]
+    if file_extension != expected_extension:
+        await update.message.reply_text(
+            f"❌ <b>Несоответствие расширения файла</b>\n\n"
+            f"Ожидается: <code>{expected_extension}</code>\n"
+            f"Получено: <code>{file_extension}</code>\n\n"
+            "Убедитесь, что файл имеет правильное расширение.",
+            parse_mode='HTML'
+        )
+        return
+    
+    # Check file size (15MB limit)
+    max_size = 15 * 1024 * 1024  # 15MB
+    if document.file_size > max_size:
+        await update.message.reply_text(
+            f"❌ <b>Файл слишком большой</b>\n\n"
+            f"Размер файла: <b>{document.file_size / (1024*1024):.1f} MB</b>\n"
+            f"Максимальный размер: <b>15 MB</b>\n\n"
+            "Пожалуйста, уменьшите размер файла или разделите его на части.",
+            parse_mode='HTML'
+        )
+        return
+    
+    await update.message.chat.send_action(action="typing")
+    logger.info(f"Document message from {user_id} (@{username}): {document.file_name} ({document.mime_type}) with caption: {caption}")
+    
+    # Processing message
+    processing_message = await update.message.reply_text(
+        f"📄 Обрабатываю документ <b>{document.file_name}</b>...\n"
+        f"<i>Это может занять некоторое время в зависимости от размера документа</i>",
+        parse_mode='HTML'
+    )
+    
+    temp_file_path = None
+    try:
+        # Get file info
+        file = await context.bot.get_file(document.file_id)
+        
+        # Create temporary file
+        temp_dir = Path(tempfile.gettempdir()) / "telegram_bot_documents"
+        temp_dir.mkdir(exist_ok=True)
+        
+        # Use original filename with proper extension
+        original_filename = document.file_name or f"document{expected_extension}"
+        temp_file_path = temp_dir / f"{user_id}_{document.file_id}_{original_filename}"
+        
+        # Download file
+        await file.download_to_drive(temp_file_path)
+        logger.debug(f"Downloaded document to: {temp_file_path}")
+        
+        # Process document with OpenAI
+        reply = await send_document_and_get_response(
+            user_id=user_id,
+            local_file_path=str(temp_file_path),
+            user_message=caption,
+            original_filename=original_filename,
+            username=username
+        )
+        
+        # Format reply
+        formatted_reply = markdown_to_html(reply)
+        
+        # Edit processing message with result
+        await processing_message.edit_text(formatted_reply, parse_mode='HTML')
+        
+        logger.info(f"Document processed successfully for user {user_id}")
+        
+    except Exception as document_processing_error:
+        logger.error(f"Error processing document from user {user_id}: {document_processing_error}")
+        # Edit processing message with error
+        try:
+            await processing_message.edit_text(
+                "❌ <b>Ошибка при обработке документа</b>\n\n"
+                "Попробуйте еще раз или обратитесь к администратору, если проблема повторяется.",
+                parse_mode='HTML'
+            )
+        except:
+            await update.message.reply_text(
+                "❌ <b>Ошибка при обработке документа</b>\n\n"
+                "Попробуйте еще раз или обратитесь к администратору, если проблема повторяется.",
+                parse_mode='HTML'
+            )
+    finally:
+        # Cleanup temporary file
+        try:
+            if temp_file_path and temp_file_path.exists():
+                temp_file_path.unlink()
+                logger.debug(f"Cleaned up temp file: {temp_file_path}")
+        except Exception as cleanup_error:
+            logger.error(f"Error cleaning up temp document file: {cleanup_error}")
 
 async def handle_image_generation_request(update: Update, context: ContextTypes.DEFAULT_TYPE, prompt: str):
     """Processes image generation requests"""
@@ -282,10 +413,10 @@ async def handle_image_generation_request(update: Update, context: ContextTypes.
         
         logger.info(f"Generated image for user {user_id}: {prompt[:50]}...")
         
-    except Exception as e:
-        error_message = str(e) if str(e) else "Image generation failed"
+    except Exception as image_generation_error:
+        error_message = str(image_generation_error) if str(image_generation_error) else "Image generation failed"
         await processing_message.edit_text(f"❌ {error_message}")
-        logger.error(f"Image generation failed for user {user_id}: {e}")
+        logger.error(f"Image generation failed for user {user_id}: {image_generation_error}")
 
 async def history(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -341,6 +472,7 @@ async def subscribe(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "• 💾 История диалогов сохраняется автоматически\n"
             "• 📁 Экспорт переписки в любой момент\n"
             "• 🖼️ Анализ изображений\n"
+            "• 📄 Работа с документами (PDF, TXT, DOCX)\n"
             "• 🎨 Генерация изображений с помощью DALL-E 3\n\n"
             "<b>Команды для управления:</b>\n"
             "• <code>/reset</code> - начать новую беседу с чистого листа\n"
@@ -359,6 +491,7 @@ async def subscribe(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "• 📚 Непрерывные беседы - бот помнит всю историю\n"
             "• 📁 Возможность экспорта переписки\n"
             "• 🖼️ Анализ изображений\n"
+            "• 📄 Работа с документами (PDF, TXT, DOCX)\n"
             "• 🎨 Генерация изображений с помощью DALL-E 3\n"
             "• 🔄 Сессии работают даже после перезапуска\n\n"
             "<b>Простые шаги для активации:</b>\n"
@@ -404,8 +537,8 @@ def init_analytics_sync():
         loop.run_until_complete(analytics.init_database())
         logger.info("Analytics database initialized successfully")
         # НЕ закрываем loop, оставляем для telegram-bot
-    except Exception as e:
-        logger.error(f"Failed to initialize analytics database: {e}")
+    except Exception as analytics_init_error:
+        logger.error(f"Failed to initialize analytics database: {analytics_init_error}")
 
 async def setup_bot_commands(bot):
     """Устанавливает меню команд для бота."""
@@ -420,8 +553,8 @@ async def setup_bot_commands(bot):
     try:
         await bot.set_my_commands(commands)
         logger.info("Bot commands menu set successfully")
-    except Exception as e:
-        logger.error(f"Failed to set bot commands: {e}")
+    except Exception as commands_setup_error:
+        logger.error(f"Failed to set bot commands: {commands_setup_error}")
 
 def markdown_to_html(text):
     """Конвертирует основные элементы Markdown в HTML для Telegram"""
@@ -472,6 +605,7 @@ def main():
     app.add_handler(CommandHandler("subscribe", subscribe))
     app.add_handler(CommandHandler("generate", generate_command))
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
+    app.add_handler(MessageHandler(filters.Document.PDF | filters.Document.TXT | filters.Document.Category("application/vnd.openxmlformats-officedocument.wordprocessingml.document"), handle_document))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
     print("Бот запущен...")
@@ -488,8 +622,8 @@ def main():
                 loop.run_until_complete(analytics.close())
             finally:
                 loop.close()
-        except Exception as e:
-            logger.error(f"Error closing analytics: {e}")
+        except Exception as analytics_close_error:
+            logger.error(f"Error closing analytics: {analytics_close_error}")
 
 if __name__ == "__main__":
     main()

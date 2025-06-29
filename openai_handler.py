@@ -1,7 +1,7 @@
 import asyncio
 import re
 from config import OPENAI_API_KEY, ASSISTANT_ID
-from session_manager import get_thread_id, set_thread_id, add_user_file
+from session_manager import get_thread_id, set_thread_id, add_user_image, add_user_document
 from logger import logger
 from openai import AsyncOpenAI
 from openai.types import Image, ImageModel, ImagesResponse
@@ -128,8 +128,8 @@ async def send_image_and_get_response(user_id: int, image_path: str, caption: st
                 purpose="vision"
             )
         
-        # Сохраняем file_id в Redis для отслеживания
-        add_user_file(user_id, uploaded_file.id)
+        # Save file_id in Redis for tracking
+        add_user_image(user_id, uploaded_file.id)
         
         # Create message content with uploaded file
         message_content = [
@@ -217,6 +217,101 @@ async def send_image_and_get_response(user_id: int, image_path: str, caption: st
     except Exception as e:
         logger.error(f"Error processing image for user {user_id}: {e}")
         return "❌ Произошла ошибка при анализе изображения. Попробуйте еще раз."
+
+async def send_document_and_get_response(user_id: int, local_file_path: str, user_message: str = "", original_filename: str = "", username: str = None) -> str:
+    """Process document with optional text message using OpenAI Assistant"""
+    thread_id = get_thread_id(user_id)
+    if not thread_id:
+        thread_id = await create_thread()
+        set_thread_id(user_id, thread_id)
+
+    try:
+        # Upload document file to OpenAI with purpose="assistants"
+        with open(local_file_path, "rb") as document_file:
+            uploaded_file = await client.files.create(
+                file=document_file,
+                purpose="assistants"
+            )
+        
+        # Track file for cleanup - use separate function for documents
+        add_user_document(user_id, uploaded_file.id, original_filename)
+        
+        # Create message content
+        if user_message.strip():
+            # User provided a specific question/instruction
+            message_text = f"Analyze the attached document '{original_filename}' and answer the following question: {user_message}"
+        else:
+            # Default analysis prompt
+            message_text = f"Please analyze the attached document '{original_filename}' and provide a comprehensive summary of its content, key points, and main topics."
+
+        # Add message to thread
+        await client.beta.threads.messages.create(
+            thread_id=thread_id,
+            role="user",
+            content=message_text,
+            attachments=[
+                {
+                    "file_id": uploaded_file.id,
+                    "tools": [{"type": "file_search"}]
+                }
+            ]
+        )
+
+        # Run assistant
+        run = await client.beta.threads.runs.create(
+            thread_id=thread_id,
+            assistant_id=ASSISTANT_ID,
+        )
+
+        # Wait for completion
+        while True:
+            run_status = await client.beta.threads.runs.retrieve(
+                thread_id=thread_id,
+                run_id=run.id
+            )
+            if run_status.status in ["completed", "failed", "cancelled"]:
+                break
+            await asyncio.sleep(1)
+
+        # Check for errors
+        if run_status.status == "failed":
+            logger.error(f"Assistant run failed: {run_status.last_error}")
+            return "❌ Ошибка при анализе документа. Попробуйте еще раз."
+
+        # Record token usage
+        tokens_used = 0
+        if run_status.usage and run_status.usage.total_tokens:
+            tokens_used = run_status.usage.total_tokens
+            logger.debug(f"[OpenAI] Document processing tokens used: {tokens_used}")
+        
+        # Record analytics
+        if tokens_used > 0:
+            try:
+                await analytics.record_usage(user_id, username, tokens_used)
+            except Exception as e:
+                logger.error(f"Failed to record usage analytics: {e}")
+
+        # Get response
+        messages = await client.beta.threads.messages.list(thread_id=thread_id)
+
+        for message in reversed(messages.data):
+            if (
+                message.role == "assistant" and
+                message.created_at >= run.created_at
+            ):
+                reply = message.content[0].text.value
+                logger.info(f"[OpenAI] Document analysis reply to {user_id}: {reply[:100]}...")
+                
+                # File will be cleaned up during /reset
+                logger.debug(f"Document file {uploaded_file.id} stored for user {user_id}, will be cleaned on /reset")
+                
+                return reply
+
+        return "Ошибка: не удалось получить ответ при анализе документа."
+
+    except Exception as document_processing_error:
+        logger.error(f"Error processing document for user {user_id}: {document_processing_error}")
+        return "❌ Ошибка при анализе документа. Попробуйте еще раз."
 
 
 # ===== IMAGE GENERATION FUNCTIONS =====

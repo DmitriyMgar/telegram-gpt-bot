@@ -3,20 +3,22 @@
 ## Project Overview
 
 **Project Name:** Telegram GPT Bot  
-**Version:** 1.6.0  
+**Version:** 1.7.0  
 **Language:** Python 3.8+  
 **Architecture:** Asynchronous, microservice-style modular design  
-**Primary Purpose:** Channel-subscription-gated Telegram bot with OpenAI Assistant integration, DALL-E image generation, user analytics, and image processing
+**Primary Purpose:** Channel-subscription-gated Telegram bot with OpenAI Assistant integration, DALL-E image generation, document processing, user analytics, and comprehensive file handling
 
 ### Core Functionality
 - **AI Chat Interface**: Users interact with OpenAI Assistant via Telegram
+- **Document Processing**: Support for PDF, TXT, and DOCX files with AI analysis using OpenAI file_search
 - **DALL-E Image Generation**: Text-to-image generation with natural language detection and explicit commands
 - **Image Processing**: Support for image uploads with OpenAI Vision API integration
 - **Channel-Based Authorization**: Access control through Telegram channel subscription verification
 - **Persistent Conversations**: Redis-backed thread management for conversation continuity
 - **Export/History Features**: Chat history retrieval and export capabilities
-- **User Analytics System**: Comprehensive token usage tracking and reporting for both text and image generation
+- **User Analytics System**: Comprehensive token usage tracking and reporting for text, image generation, and document processing
 - **Cost Control**: Real-time cost tracking and transparent pricing for all AI operations
+- **File Management**: Comprehensive lifecycle management for images and documents with automatic cleanup
 - **Caching System**: Intelligent Redis caching for subscription status optimization
 
 ---
@@ -36,6 +38,12 @@
                        │   System         │    │   Images API    │
                        │   (subscription) │    │                 │
                        └──────────────────┘    └─────────────────┘
+                                │                       │
+                                ▼                       ▼
+                       ┌──────────────────┐    ┌─────────────────┐
+                       │  File Processing │    │  Document API   │
+                       │ (Images + Docs)  │    │  (file_search)  │
+                       └──────────────────┘    └─────────────────┘
                                 │
                         ┌───────▼───────┐    ┌─────────────────┐
                         │     Redis     │    │   Analytics     │
@@ -46,10 +54,10 @@
 
 ### Component Architecture
 1. **Presentation Layer**: Telegram Bot API handlers (`main.py`)
-2. **Business Logic Layer**: Authorization, session management, message processing, image processing, image generation, analytics
+2. **Business Logic Layer**: Authorization, session management, message processing, document processing, image processing, image generation, analytics
 3. **Data Access Layer**: Redis for caching and sessions, SQLite for analytics, temporary file storage
-4. **External API Layer**: OpenAI Assistant API (text & vision), OpenAI Images API (DALL-E 3), Telegram Bot API, OpenAI File API
-5. **Infrastructure Layer**: Logging, configuration, error handling, file management, cost tracking
+4. **External API Layer**: OpenAI Assistant API (text, vision, file_search), OpenAI Images API (DALL-E 3), Telegram Bot API, OpenAI File API
+5. **Infrastructure Layer**: Logging, configuration, error handling, comprehensive file lifecycle management, cost tracking
 
 ---
 
@@ -93,9 +101,10 @@ telegram-gpt-bot/
   - Returns True if user has access
 
 - `start(update, context)` - Welcome handler with authorization
-- `reset(update, context)` - Clear conversation thread
+- `reset(update, context)` - Clear conversation thread and cleanup files
 - `handle_message(update, context)` - Process user text messages
 - `handle_photo(update, context)` - Process user image uploads
+- `handle_document(update, context)` - Process user document uploads (PDF, TXT, DOCX)
 - `history(update, context)` - Retrieve conversation history
 - `export(update, context)` - Export chat history as file
 - `subscribe(update, context)` - Check subscription status
@@ -115,6 +124,7 @@ telegram-gpt-bot/
 |--------------|------------------------------------------|------------------------|
 | Text         | Regular chat messages + image generation | All text formats       |
 | Images       | Image analysis with optional captions    | JPEG, PNG, WebP (≤20MB)|
+| Documents    | Document analysis with optional questions| PDF, TXT, DOCX (≤15MB) |
 | Generation   | Natural language image generation        | "нарисуй", "draw", etc.|
 
 ### 2. openai_handler.py - OpenAI Integration
@@ -160,17 +170,26 @@ telegram-gpt-bot/
   - Supports optional text captions alongside images
   - Integrates with token usage analytics
 
+- `send_document_and_get_response(user_id: int, local_file_path: str, original_filename: str, user_question: str = "", username: str = None) -> str`
+  - Process documents with OpenAI Assistants API using file_search tool
+  - Uploads document to OpenAI storage with `purpose="assistants"`
+  - Supports PDF, TXT, and DOCX file formats with comprehensive analysis
+  - Handles specific user questions or provides default comprehensive analysis
+  - Integrates with session management and analytics tracking
+  - Returns detailed AI analysis of document content and structure
+
 #### OpenAI API Flow:
 1. Get/Create thread for user
-2. Add user message to thread (text, image+text, or generation request)
-3. For images: Upload to OpenAI storage and reference by file_id
-4. For generation: Call DALL-E 3 Images API
-5. Create and execute run (for text/image analysis)
-6. Poll for completion
-7. Retrieve and filter responses
-8. Clean up uploaded files (images only)
-9. Record usage in analytics
-10. Return formatted response or generated image
+2. Add user message to thread (text, image+text, document+question, or generation request)
+3. For images: Upload to OpenAI storage with `purpose="vision"` and reference by file_id
+4. For documents: Upload to OpenAI storage with `purpose="assistants"` and attach with file_search tool
+5. For generation: Call DALL-E 3 Images API
+6. Create and execute run (for text/image/document analysis)
+7. Poll for completion
+8. Retrieve and filter responses
+9. Clean up uploaded files (images only - documents managed by session lifecycle)
+10. Record usage in analytics
+11. Return formatted response or generated image
 
 #### DALL-E 3 Integration:
 - **Model**: dall-e-3
@@ -180,8 +199,8 @@ telegram-gpt-bot/
 - **Error Handling**: Comprehensive API error mapping
 - **Cost Tracking**: Automatic analytics recording
 
-### 3. session_manager.py - Redis Session Management
-**Purpose**: Persistent storage for user conversation threads
+### 3. session_manager.py - Redis Session Management & File Lifecycle
+**Purpose**: Persistent storage for user conversation threads and comprehensive file management
 
 #### Key Functions:
 - `get_thread_id(user_id: int) -> str | None`
@@ -192,14 +211,38 @@ telegram-gpt-bot/
   - Stores thread_id for user persistence
   - Enables conversation continuity across restarts
 
-- `reset_thread(user_id: int)`
-  - Deletes stored thread_id
+- `async reset_thread(user_id: int)`
+  - Deletes stored thread_id and cleans up all associated files
   - Forces new conversation thread creation
+  - Removes images and documents from OpenAI storage
+
+#### Image Management Functions:
+- `add_user_image(user_id: int, file_id: str)` - Track uploaded images in Redis
+- `get_user_images(user_id: int) -> list[str]` - Retrieve user's image file IDs
+- `clear_user_images(user_id: int)` - Clear image tracking data
+- `async delete_user_images_from_openai(user_id: int)` - Delete images from OpenAI storage
+
+#### Document Management Functions:
+- `add_user_document(user_id: int, file_id: str, original_filename: str)` - Track uploaded documents
+- `get_user_documents(user_id: int) -> list[dict]` - Retrieve document metadata
+- `clear_user_documents(user_id: int)` - Clear document tracking data
+- `async delete_user_documents_from_openai(user_id: int)` - Delete documents from OpenAI storage
 
 #### Redis Schema:
-- **Key Pattern**: `thread_id:{user_id}`
-- **Value**: OpenAI thread identifier string
-- **TTL**: Persistent (no expiration)
+- **Thread Storage**
+  - **Key Pattern**: `thread_id:{user_id}`
+  - **Value**: OpenAI thread identifier string
+  - **TTL**: Persistent (no expiration)
+
+- **Image File Tracking**
+  - **Key Pattern**: `user_images:{user_id}`
+  - **Value**: Redis set of OpenAI file_id strings
+  - **TTL**: Persistent (cleaned on reset)
+
+- **Document File Tracking**
+  - **Key Pattern**: `user_documents:{user_id}`
+  - **Value**: Redis hash with file_id → original_filename mapping
+  - **TTL**: Persistent (cleaned on reset)
 
 ### 4. subscription_checker.py - Authorization System
 **Purpose**: Telegram channel subscription verification with caching
@@ -400,6 +443,22 @@ TTL: 600 seconds (10 minutes)
 Example: subscription:123456789 → "true"
 ```
 
+#### Image File Tracking
+```
+Key: user_images:{user_id}
+Value: Redis Set of OpenAI file_id strings
+TTL: Persistent (cleaned on reset)
+Example: user_images:123456789 → {"file-abc123", "file-xyz789"}
+```
+
+#### Document File Tracking
+```
+Key: user_documents:{user_id}
+Value: Redis Hash {file_id: original_filename}
+TTL: Persistent (cleaned on reset)
+Example: user_documents:123456789 → {"file-doc123": "report.pdf", "file-doc456": "notes.docx"}
+```
+
 ### SQLite Analytics Database
 
 #### User Analytics Table
@@ -432,21 +491,21 @@ id | user_id   | username  | request_date | tokens_used | created_at
 ## API Integrations
 
 ### Telegram Bot API Endpoints Used
-- `POST /bot{token}/sendMessage` - Send messages
-- `POST /bot{token}/sendDocument` - Send files
-- `POST /bot{token}/sendChatAction` - Typing indicators
+- `POST /bot{token}/sendMessage` - Send messages with document processing results
+- `POST /bot{token}/sendDocument` - Send exported files
+- `POST /bot{token}/sendChatAction` - Typing indicators during processing
 - `GET /bot{token}/getChatMember` - Check channel membership
-- `GET /bot{token}/getFile` - Get file info for downloads
-- File download via HTTPS - Download user-uploaded images
+- `GET /bot{token}/getFile` - Get file info for downloads (images and documents)
+- File download via HTTPS - Download user-uploaded images and documents
 
 ### OpenAI Assistants API Endpoints Used
 - `POST /v1/threads` - Create conversation threads
-- `POST /v1/threads/{thread_id}/messages` - Add messages (text and images)
-- `POST /v1/threads/{thread_id}/runs` - Execute assistant runs
+- `POST /v1/threads/{thread_id}/messages` - Add messages (text, images, and documents)
+- `POST /v1/threads/{thread_id}/runs` - Execute assistant runs with file_search tool
 - `GET /v1/threads/{thread_id}/runs/{run_id}` - Check run status
 - `GET /v1/threads/{thread_id}/messages` - Retrieve messages
-- `POST /v1/files` - Upload image files with `purpose="vision"`
-- `DELETE /v1/files/{file_id}` - Clean up uploaded files
+- `POST /v1/files` - Upload files with `purpose="vision"` (images) or `purpose="assistants"` (documents)
+- `DELETE /v1/files/{file_id}` - Clean up uploaded files during reset operations
 
 ---
 
@@ -582,10 +641,12 @@ WantedBy=multi-user.target
 4. **Redis Downtime**: Bot continues with reduced functionality
 5. **OpenAI API Issues**: User-friendly error responses
 6. **Image Processing**: Various formats, sizes, upload failures
-7. **Image Generation**: DALL-E requests, content policy violations, cost tracking
-8. **File Storage**: OpenAI storage limits, cleanup verification
-9. **Cost Tracking**: Analytics accuracy, usage limit scenarios
-10. **Multilingual Support**: Russian and English generation requests
+7. **Document Processing**: PDF, TXT, DOCX files, size limits, format validation, analysis accuracy
+8. **Image Generation**: DALL-E requests, content policy violations, cost tracking
+9. **File Storage**: OpenAI storage limits, cleanup verification, lifecycle management
+10. **Cost Tracking**: Analytics accuracy, usage limit scenarios
+11. **File Management**: Separate tracking of images vs documents, reset functionality
+12. **Multilingual Support**: Russian and English generation requests
 
 ### Extension Points
 - **Multiple Channels**: Extend subscription_checker for multi-channel support
@@ -595,9 +656,13 @@ WantedBy=multi-user.target
 - **Cost Limits**: Daily/monthly usage restrictions per user
 - **Image Variations**: Multiple image sizes and quality options
 - **Advanced Generation**: Style presets, image editing, variations
+- **Document Types**: Support for additional formats (PPTX, XLSX, etc.)
+- **Document Features**: OCR for scanned documents, table extraction, chart analysis
+- **Batch Processing**: Multiple document uploads and analysis
+- **Document Storage**: Vector store integration for document search and retrieval
 
 ---
 
-**Last Updated**: December 28, 2024, 18:00 UTC  
-**Document Version**: 1.3  
-**Project Version**: 1.6.0 
+**Last Updated**: June 29, 2025, 17:50 MSK  
+**Document Version**: 1.4  
+**Project Version**: 1.7.0 

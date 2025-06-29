@@ -5,13 +5,17 @@ from logger import logger
 r = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, db=REDIS_DB, decode_responses=True)
 
 SESSION_PREFIX = "thread_id:"
-FILES_PREFIX = "user_files:"  # Новый префикс для файлов
+IMAGES_PREFIX = "user_images:"  # Prefix for user images
+DOCUMENTS_PREFIX = "user_documents:"  # Prefix for user documents
 
 def _key(user_id: int) -> str:
     return f"{SESSION_PREFIX}{user_id}"
 
-def _files_key(user_id: int) -> str:
-    return f"{FILES_PREFIX}{user_id}"
+def _images_key(user_id: int) -> str:
+    return f"{IMAGES_PREFIX}{user_id}"
+
+def _documents_key(user_id: int) -> str:
+    return f"{DOCUMENTS_PREFIX}{user_id}"
 
 def get_thread_id(user_id: int) -> str | None:
     try:
@@ -26,74 +30,143 @@ def set_thread_id(user_id: int, thread_id: str):
     except Exception as e:
         logger.error(f"Redis error in set_thread_id: {e}")
 
-# === НОВЫЕ ФУНКЦИИ ДЛЯ ФАЙЛОВ ===
-def add_user_file(user_id: int, file_id: str):
-    """Добавляет file_id в список файлов пользователя"""
+# === IMAGE MANAGEMENT FUNCTIONS ===
+def add_user_image(user_id: int, file_id: str):
+    """Adds image file_id to user's image list"""
     try:
-        r.sadd(_files_key(user_id), file_id)
-        logger.debug(f"Added file {file_id} for user {user_id}")
+        r.sadd(_images_key(user_id), file_id)
+        logger.debug(f"Added image {file_id} for user {user_id}")
     except Exception as e:
-        logger.error(f"Redis error in add_user_file: {e}")
+        logger.error(f"Redis error in add_user_image: {e}")
 
-def get_user_files(user_id: int) -> list[str]:
-    """Получает все file_id пользователя"""
+def get_user_images(user_id: int) -> list[str]:
+    """Gets all image file_ids for user"""
     try:
-        files = r.smembers(_files_key(user_id))
-        return list(files) if files else []
+        images = r.smembers(_images_key(user_id))
+        return list(images) if images else []
     except Exception as e:
-        logger.error(f"Redis error in get_user_files: {e}")
+        logger.error(f"Redis error in get_user_images: {e}")
         return []
 
-def clear_user_files(user_id: int):
-    """Очищает список файлов пользователя"""
+def clear_user_images(user_id: int):
+    """Clears user's image list"""
     try:
-        r.delete(_files_key(user_id))
-        logger.debug(f"Cleared files list for user {user_id}")
+        r.delete(_images_key(user_id))
+        logger.debug(f"Cleared images list for user {user_id}")
     except Exception as e:
-        logger.error(f"Redis error in clear_user_files: {e}")
+        logger.error(f"Redis error in clear_user_images: {e}")
 
-async def delete_user_files_from_openai(user_id: int):
-    """Удаляет все файлы пользователя из OpenAI storage"""
+# === DOCUMENT MANAGEMENT FUNCTIONS ===
+def add_user_document(user_id: int, file_id: str, original_filename: str = ""):
+    """Adds document file_id to user's document list with metadata"""
+    try:
+        # Store both file_id and filename as a hash
+        document_data = {"file_id": file_id, "filename": original_filename}
+        r.hset(f"{_documents_key(user_id)}:{file_id}", mapping=document_data)
+        logger.debug(f"Added document {file_id} ({original_filename}) for user {user_id}")
+    except Exception as e:
+        logger.error(f"Redis error in add_user_document: {e}")
+
+def get_user_documents(user_id: int) -> list[dict]:
+    """Gets all user documents with their metadata"""
+    try:
+        keys = r.keys(f"{_documents_key(user_id)}:*")
+        documents = []
+        for key in keys:
+            doc_data = r.hgetall(key)
+            if doc_data:
+                documents.append({
+                    "file_id": doc_data.get("file_id", ""),
+                    "filename": doc_data.get("filename", "")
+                })
+        return documents
+    except Exception as e:
+        logger.error(f"Redis error in get_user_documents: {e}")
+        return []
+
+def clear_user_documents(user_id: int):
+    """Clears user's document list"""
+    try:
+        keys = r.keys(f"{_documents_key(user_id)}:*")
+        if keys:
+            r.delete(*keys)
+        logger.debug(f"Cleared documents list for user {user_id}")
+    except Exception as e:
+        logger.error(f"Redis error in clear_user_documents: {e}")
+
+async def delete_user_documents_from_openai(user_id: int):
+    """Deletes all user documents from OpenAI storage"""
     from openai import AsyncOpenAI
     from config import OPENAI_API_KEY
     
     client = AsyncOpenAI(api_key=OPENAI_API_KEY)
-    files_to_delete = get_user_files(user_id)
+    documents_to_delete = get_user_documents(user_id)
     
-    if not files_to_delete:
-        logger.debug(f"No files to delete for user {user_id}")
+    if not documents_to_delete:
+        logger.debug(f"No documents to delete for user {user_id}")
         return
     
     deleted_count = 0
-    for file_id in files_to_delete:
+    for doc in documents_to_delete:
+        file_id = doc.get("file_id")
+        original_filename = doc.get("filename", "unknown")
+        if file_id:
+            try:
+                await client.files.delete(file_id)
+                deleted_count += 1
+                logger.debug(f"Deleted document {file_id} ({original_filename}) for user {user_id}")
+            except Exception as doc_delete_error:
+                logger.warning(f"Failed to delete document {file_id} ({original_filename}) for user {user_id}: {doc_delete_error}")
+    
+    # Clear list after deletion
+    clear_user_documents(user_id)
+    logger.info(f"Deleted {deleted_count} documents for user {user_id} on reset")
+
+async def delete_user_images_from_openai(user_id: int):
+    """Deletes all user images from OpenAI storage"""
+    from openai import AsyncOpenAI
+    from config import OPENAI_API_KEY
+    
+    client = AsyncOpenAI(api_key=OPENAI_API_KEY)
+    images_to_delete = get_user_images(user_id)
+    
+    if not images_to_delete:
+        logger.debug(f"No images to delete for user {user_id}")
+        return
+    
+    deleted_count = 0
+    for file_id in images_to_delete:
         try:
             await client.files.delete(file_id)
             deleted_count += 1
-            logger.debug(f"Deleted file {file_id} for user {user_id}")
-        except Exception as e:
-            logger.warning(f"Failed to delete file {file_id} for user {user_id}: {e}")
+            logger.debug(f"Deleted image {file_id} for user {user_id}")
+        except Exception as image_delete_error:
+            logger.warning(f"Failed to delete image {file_id} for user {user_id}: {image_delete_error}")
     
-    # Очищаем список после удаления
-    clear_user_files(user_id)
-    logger.info(f"Deleted {deleted_count} files for user {user_id} on reset")
+    # Clear list after deletion
+    clear_user_images(user_id)
+    logger.info(f"Deleted {deleted_count} images for user {user_id} on reset")
 
 async def reset_thread(user_id: int):
-    """Сбрасывает thread и удаляет все файлы пользователя"""
+    """Resets thread and deletes all user images and documents"""
     try:
-        # Удаляем файлы из OpenAI
-        await delete_user_files_from_openai(user_id)
+        # Delete images from OpenAI
+        await delete_user_images_from_openai(user_id)
         
-        # Удаляем thread_id
+        # Delete documents from OpenAI
+        await delete_user_documents_from_openai(user_id)
+        
+        # Delete thread_id
         r.delete(_key(user_id))
         
-        logger.info(f"Reset complete for user {user_id}: thread and files cleared")
-    except Exception as e:
-        logger.error(f"Error in reset_thread: {e}")
+        logger.info(f"Reset complete for user {user_id}: thread, images, and documents cleared")
+    except Exception as reset_error:
+        logger.error(f"Error in reset_thread: {reset_error}")
 
-# Оставляем синхронную версию для совместимости
+# Keep synchronous version for compatibility
 def reset_thread_sync(user_id: int):
-    """Синхронная версия сброса (только thread_id, без файлов)"""
+    """Synchronous version of reset (thread_id only, no files)"""
     try:
         r.delete(_key(user_id))
-    except Exception as e:
-        logger.error(f"Redis error in reset_thread_sync: {e}")
+    except Exception as sync_reset_error:
+        logger.error(f"Redis error in reset_thread_sync: {sync_reset_error}")
