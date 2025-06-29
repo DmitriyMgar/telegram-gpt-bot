@@ -14,8 +14,8 @@
 ## 🎯 Project Overview
 
 **Project Name:** Telegram GPT Bot  
-**Current Version:** 1.7.0  
-**Last Updated:** January 18, 2025  
+**Current Version:** 1.8.0  
+**Last Updated:** June 29, 2025  
 **Status:** ✅ Production Ready  
 **Repository:** telegram-gpt-bot  
 
@@ -34,7 +34,8 @@
 
 | Version | Release Date | Status | Key Feature |
 |---------|--------------|---------|-------------|
-| **1.7.0** | Jan 18, 2025 | ✅ Complete | Document File Attachment Support |
+| **1.8.0** | Jun 29, 2025 | ✅ Complete | Dual-Mode Bot Operation (Private + Group/Channel) |
+| **1.7.0** | Jun 28, 2025 | ✅ Complete | Document File Attachment Support |
 | **1.6.0** | Jun 28, 2025 | ✅ Complete | DALL-E Image Generation |
 | **1.5.0** | Jun 28, 2025 | ✅ Complete | Context Management & File Lifecycle |
 | **1.4.0** | Jun 27, 2025 | ✅ Complete | Image Support & OpenAI API Fix |
@@ -47,28 +48,70 @@
 
 ## 🚀 Latest Release
 
-### Version 1.7.0 - Document File Attachment Support
-**Release Date:** January 18, 2025  
-**Development Time:** ~2 hours  
+### Version 1.8.0 - Dual-Mode Bot Operation (Private + Group/Channel)
+**Release Date:** June 29, 2025  
+**Development Time:** ~4 hours  
 **Status:** ✅ Production Ready  
 
 #### 🎯 Key Features
-- **Document Types:** PDF, TXT, DOCX support
-- **Size Limits:** 15MB maximum with validation  
-- **Security:** MIME type and extension validation
-- **AI Analysis:** OpenAI Assistants API with file_search
-- **User Experience:** Russian interface with clear feedback
-- **File Management:** Automatic cleanup with `/reset`
+- **Dual-Mode Operation:** Private chat + Group/Channel administrator mode
+- **Smart Context Processing:** Bot sees all group messages for context
+- **Intelligent Response Filtering:** Responds only to mentions and replies in groups
+- **Separate Session Management:** Per-channel conversation threads
+- **Unified Authorization:** Same subscription requirement across both modes
+- **Full Backward Compatibility:** Private chat functionality unchanged
 
 #### 📈 Impact
-- **New Functions:** 6 created, 4 renamed for clarity
-- **Code Quality:** Resolved all naming ambiguities  
-- **Lines Modified:** ~350 across 3 core files
-- **Testing:** Comprehensive validation completed
+- **New Modules:** `chat_detector.py` for dual-mode logic
+- **Enhanced Session Management:** Chat-based Redis key strategy  
+- **Core Integration:** All handlers support dual-mode operation
+- **Lines Modified:** ~800+ across 4 core files
+- **Testing:** User confirmed "works perfectly"
 
 ---
 
 ## 📚 Version Details
+
+### Version 1.8.0 - Dual-Mode Bot Operation (Private + Group/Channel)
+*June 29, 2025 21:56 MSK*
+
+**Implementation Focus:** Enable bot operation in both private chats and groups/channels with intelligent response filtering
+
+**Problem Solved:** Bot was only processing mentioned messages in groups, missing conversation context for appropriate responses
+
+**Core Changes:**
+- Created `chat_detector.py` module with dual processing/response logic
+- Implemented `should_process_message()` - processes ALL group messages for context
+- Implemented `should_respond_in_chat()` - responds only to mentions, replies, and commands
+- Enhanced `session_manager.py` with chat-based Redis key strategy
+- Added context-only message processing functions to `openai_handler.py`
+- Updated all handlers in `main.py` for dual-mode operation
+
+**Technical Architecture:**
+- **Private Chats:** `user:{user_id}` → OpenAI thread (unchanged behavior)
+- **Group Chats:** `chat:{chat_id}` → OpenAI thread (new per-channel sessions)
+- **Context Processing:** ALL user messages tracked for conversation awareness
+- **Response Logic:** Smart filtering based on mentions (`@botname`), replies, commands
+- **File Management:** Per-chat tracking with separate cleanup
+
+**Bot Behavior:**
+- **Private Mode:** Responds to all messages (unchanged experience)
+- **Group Mode:** Sees all messages for context, responds only when addressed
+- **Authorization:** Channel subscription required for all users across both modes
+- **Session Persistence:** Separate conversation threads per chat
+
+**Files Modified:**
+- `chat_detector.py` - NEW: Chat type detection and response filtering
+- `session_manager.py` - Enhanced with dual-mode session management
+- `openai_handler.py` - Added context-only processing functions
+- `main.py` - Updated all handlers for dual-mode operation
+
+**Critical Fix Implemented:**
+- **Issue:** Bot couldn't see group conversation context when not mentioned
+- **Solution:** Separated message processing from response generation
+- **Result:** Bot maintains full conversation awareness while respecting group etiquette
+
+---
 
 ### Version 1.7.0 - Document File Attachment Support
 *June 29, 2025 17:50 MSK*
@@ -336,7 +379,7 @@
 
 ---
 
-**Last Updated:** January 18, 2025  
+**Last Updated:** June 29, 2025  
 **Next Review:** TBD  
 **Maintainer:** Development Team  
 **Status:** ✅ Active Development 

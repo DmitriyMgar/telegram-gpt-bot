@@ -3,23 +3,27 @@
 ## Project Overview
 
 **Project Name:** Telegram GPT Bot  
-**Version:** 1.7.0  
+**Version:** 1.8.0  
 **Language:** Python 3.8+  
 **Architecture:** Asynchronous, microservice-style modular design  
-**Primary Purpose:** Channel-subscription-gated Telegram bot with OpenAI Assistant integration, DALL-E image generation, document processing, user analytics, and comprehensive file handling
+**Primary Purpose:** Channel-subscription-gated Telegram bot with OpenAI Assistant integration, DALL-E image generation, document processing, user analytics, comprehensive file handling, and **dual-mode operation** (private chats + group/channel administrator mode)
 
 ### Core Functionality
+- **Dual-Mode Operation**: Bot operates in two distinct modes:
+  - **Direct Mode**: Full AI chat functionality in private conversations
+  - **Chat Participant Mode**: Responds to mentions (@botname) and replies in groups/channels
 - **AI Chat Interface**: Users interact with OpenAI Assistant via Telegram
 - **Document Processing**: Support for PDF, TXT, and DOCX files with AI analysis using OpenAI file_search
 - **DALL-E Image Generation**: Text-to-image generation with natural language detection and explicit commands
 - **Image Processing**: Support for image uploads with OpenAI Vision API integration
 - **Channel-Based Authorization**: Access control through Telegram channel subscription verification
-- **Persistent Conversations**: Redis-backed thread management for conversation continuity
+- **Persistent Conversations**: Redis-backed thread management for conversation continuity with per-chat threading
 - **Export/History Features**: Chat history retrieval and export capabilities
 - **User Analytics System**: Comprehensive token usage tracking and reporting for text, image generation, and document processing
 - **Cost Control**: Real-time cost tracking and transparent pricing for all AI operations
 - **File Management**: Comprehensive lifecycle management for images and documents with automatic cleanup
 - **Caching System**: Intelligent Redis caching for subscription status optimization
+- **Smart Message Filtering**: Context-aware response logic for group conversations
 
 ---
 
@@ -30,6 +34,8 @@
 ┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
 │   Telegram      │◄──►│   Bot Core       │◄──►│   OpenAI        │
 │   Users         │    │   (main.py)      │    │   Assistant     │
+│   (Private +    │    │   + Chat Detect  │    │                 │
+│    Groups)      │    │   (chat_detector)│    │                 │
 └─────────────────┘    └──────────────────┘    └─────────────────┘
                                 │                       │
                                 ▼                       ▼
@@ -43,21 +49,23 @@
                        ┌──────────────────┐    ┌─────────────────┐
                        │  File Processing │    │  Document API   │
                        │ (Images + Docs)  │    │  (file_search)  │
+                       │  Dual-Mode Mgmt  │    │                 │
                        └──────────────────┘    └─────────────────┘
                                 │
                         ┌───────▼───────┐    ┌─────────────────┐
                         │     Redis     │    │   Analytics     │
                         │   (Cache &    │    │   Database      │
-                        │   Sessions)   │    │   (SQLite)      │
+                        │  Sessions +   │    │   (SQLite)      │
+                        │  Chat Threads)│    │                 │
                         └───────────────┘    └─────────────────┘
 ```
 
 ### Component Architecture
-1. **Presentation Layer**: Telegram Bot API handlers (`main.py`)
-2. **Business Logic Layer**: Authorization, session management, message processing, document processing, image processing, image generation, analytics
-3. **Data Access Layer**: Redis for caching and sessions, SQLite for analytics, temporary file storage
+1. **Presentation Layer**: Telegram Bot API handlers (`main.py`) with dual-mode routing
+2. **Business Logic Layer**: Authorization, session management, message processing, document processing, image processing, image generation, analytics, **chat detection system**
+3. **Data Access Layer**: Redis for caching and sessions (user + chat-based), SQLite for analytics, temporary file storage
 4. **External API Layer**: OpenAI Assistant API (text, vision, file_search), OpenAI Images API (DALL-E 3), Telegram Bot API, OpenAI File API
-5. **Infrastructure Layer**: Logging, configuration, error handling, comprehensive file lifecycle management, cost tracking
+5. **Infrastructure Layer**: Logging, configuration, error handling, comprehensive file lifecycle management, cost tracking, **intelligent response filtering**
 
 ---
 
@@ -65,12 +73,13 @@
 
 ```
 telegram-gpt-bot/
-├── main.py                    # Entry point & Telegram handlers
+├── main.py                    # Entry point & Telegram handlers (dual-mode)
 ├── config.py                  # Configuration & environment variables
 ├── logger.py                  # Centralized logging setup
-├── openai_handler.py          # OpenAI Assistant API integration
-├── session_manager.py         # Redis session management
+├── openai_handler.py          # OpenAI Assistant API integration (dual-mode)
+├── session_manager.py         # Redis session management (user + chat-based)
 ├── subscription_checker.py    # Channel subscription verification
+├── chat_detector.py           # Chat detection & response filtering (NEW)
 ├── user_analytics.py          # User analytics and token usage tracking
 ├── view_analytics.py          # Analytics viewing tool
 ├── requirements.txt           # Python dependencies
@@ -91,160 +100,153 @@ telegram-gpt-bot/
 
 ## Core Modules Documentation
 
-### 1. main.py - Bot Entry Point
-**Purpose**: Telegram bot handlers and application lifecycle management
+### 1. main.py - Bot Entry Point (Enhanced for Dual-Mode)
+**Purpose**: Telegram bot handlers and application lifecycle management with dual-mode operation support
 
 #### Key Functions:
+- `init_bot_info()` - **NEW**: Initialize bot username and ID for mention detection
 - `is_authorized_async(user_id: int) -> bool`
   - Async authorization check via channel subscription
   - Integrates with subscription_checker module
   - Returns True if user has access
 
-- `start(update, context)` - Welcome handler with authorization
-- `reset(update, context)` - Clear conversation thread and cleanup files
-- `handle_message(update, context)` - Process user text messages
-- `handle_photo(update, context)` - Process user image uploads
+- `start(update, context)` - Welcome handler with authorization and context-aware messaging
+- `reset(update, context)` - Clear conversation thread and cleanup files (dual-mode)
+- `handle_message(update, context)` - **ENHANCED**: Process user text messages with dual-mode routing
+- `handle_photo(update, context)` - **ENHANCED**: Process user image uploads with dual-mode routing
 - `handle_document(update, context)` - Process user document uploads (PDF, TXT, DOCX)
 - `history(update, context)` - Retrieve conversation history
 - `export(update, context)` - Export chat history as file
 - `subscribe(update, context)` - Check subscription status
 
-#### Bot Commands:
-| Command      | Description                              | Authorization Required |
-|--------------|------------------------------------------|------------------------|
-| `/start`     | Welcome message & instructions           | Yes                    |
-| `/reset`     | Clear conversation thread                | Yes                    |
-| `/generate`  | Generate image with DALL-E 3            | Yes                    |
-| `/history`   | Show recent conversation history         | Yes                    |
-| `/export`    | Export conversation as text file         | Yes                    |
-| `/subscribe` | Check subscription status & instructions | No                     |
+#### Dual-Mode Behavior:
+| Chat Type    | Response Logic                                    | Session Management    |
+|--------------|--------------------------------------------------|-----------------------|
+| Private      | Responds to all messages (unchanged)             | `user:{user_id}`      |
+| Group        | Responds to mentions, replies, commands only     | `chat:{chat_id}`      |
+| Supergroup   | Responds to mentions, replies, commands only     | `chat:{chat_id}`      |
+| Channel      | Responds to commands only                        | `chat:{chat_id}`      |
 
-#### Message Handling:
-| Input Type   | Description                              | Supported Formats      |
-|--------------|------------------------------------------|------------------------|
-| Text         | Regular chat messages + image generation | All text formats       |
-| Images       | Image analysis with optional captions    | JPEG, PNG, WebP (≤20MB)|
-| Documents    | Document analysis with optional questions| PDF, TXT, DOCX (≤15MB) |
-| Generation   | Natural language image generation        | "нарисуй", "draw", etc.|
-
-### 2. openai_handler.py - OpenAI Integration
-**Purpose**: Manages OpenAI Assistant API interactions and DALL-E image generation
+### 2. chat_detector.py - Chat Detection System (NEW)
+**Purpose**: Intelligent chat type detection and response filtering for dual-mode operation
 
 #### Key Functions:
+- `get_chat_type(update) -> str`
+  - Detects chat type: `private`, `group`, `supergroup`, `channel`
+  - Returns string identifier for chat classification
+
+- `is_bot_mentioned(text: str, bot_username: str) -> bool`
+  - Checks for @botname mentions in message text
+  - Handles various mention formats and positioning
+
+- `is_reply_to_bot(update, bot_id: int) -> bool`
+  - Detects if message is a reply to bot's previous message
+  - Uses message threading for context detection
+
+- `is_bot_command(text: str) -> bool`
+  - Identifies bot commands (/, /start, /reset, etc.)
+  - Returns True for command-style messages
+
+- `should_respond_in_chat(update, bot_username: str, bot_id: int) -> bool`
+  - **MAIN DECISION FUNCTION**: Determines if bot should respond
+  - Combines chat type, mentions, replies, and commands
+  - Core logic for dual-mode operation
+
+- `should_process_message(update, bot_username: str, bot_id: int) -> bool`
+  - **NEW**: Determines if bot should process message for context
+  - Processes ALL group messages for conversation awareness
+  - Separate from response logic for better context tracking
+
+- `get_chat_identifier(update) -> str`
+  - Generates unique session identifiers for Redis storage
+  - Format: `user:{user_id}` for private, `chat:{chat_id}` for groups
+
+- `get_log_context(update) -> str`
+  - Creates contextual logging strings for debugging
+  - Includes chat type, user info, and message context
+
+### 3. openai_handler.py - OpenAI Integration (Enhanced for Dual-Mode)
+**Purpose**: Manages OpenAI Assistant API interactions with dual-mode support
+
+#### Key Functions (Existing):
 - `create_thread() -> str`
-  - Creates new OpenAI conversation thread
-  - Returns thread_id for session tracking
-
 - `send_message_and_get_response(user_id: int, message: str, username: str = None) -> str`
-  - Core message processing function
-  - Manages thread creation/retrieval
-  - Handles assistant run execution
-  - Tracks token usage for analytics
-  - Returns AI response
-
 - `detect_image_generation_request(message: str) -> bool`
-  - Detects image generation requests using multilingual regex patterns
-  - Supports Russian ("нарисуй", "создай картинку") and English ("draw", "generate image")
-  - Returns True if message is requesting image generation
-
 - `generate_image_dalle(prompt: str, user_id: int, username: str = None, size: str = "1024x1024") -> tuple[str, int]`
-  - Core DALL-E 3 image generation function
-  - Integrates with OpenAI Images API
-  - Returns image URL and equivalent token cost
-  - Records usage in analytics system
-  - Handles all API errors with user-friendly messages
-
 - `get_message_history(user_id: int, limit: int = 10) -> str`
-  - Retrieves formatted conversation history
-  - Returns emoji-formatted message list
-
 - `export_message_history(user_id: int, limit: int = 50) -> str | None`
-  - Creates temporary file with conversation export
-  - Returns file path for download
-
 - `send_image_and_get_response(user_id: int, image_path: str, caption: str = "", username: str = None) -> str`
-  - Process images with OpenAI Vision API through Assistants
-  - Uploads image to OpenAI storage with `purpose="vision"`
-  - Uses proper `image_file` content type with `file_id` reference
-  - Includes automatic file cleanup to prevent quota issues
-  - Supports optional text captions alongside images
-  - Integrates with token usage analytics
-
 - `send_document_and_get_response(user_id: int, local_file_path: str, original_filename: str, user_question: str = "", username: str = None) -> str`
-  - Process documents with OpenAI Assistants API using file_search tool
-  - Uploads document to OpenAI storage with `purpose="assistants"`
-  - Supports PDF, TXT, and DOCX file formats with comprehensive analysis
-  - Handles specific user questions or provides default comprehensive analysis
-  - Integrates with session management and analytics tracking
-  - Returns detailed AI analysis of document content and structure
 
-#### OpenAI API Flow:
-1. Get/Create thread for user
-2. Add user message to thread (text, image+text, document+question, or generation request)
-3. For images: Upload to OpenAI storage with `purpose="vision"` and reference by file_id
-4. For documents: Upload to OpenAI storage with `purpose="assistants"` and attach with file_search tool
-5. For generation: Call DALL-E 3 Images API
-6. Create and execute run (for text/image/document analysis)
-7. Poll for completion
-8. Retrieve and filter responses
-9. Clean up uploaded files (images only - documents managed by session lifecycle)
-10. Record usage in analytics
-11. Return formatted response or generated image
+#### New Dual-Mode Functions:
+- `send_message_and_get_response_for_chat(chat_identifier: str, message: str, user_id: int, username: str = None) -> str`
+  - **NEW**: Chat-based message processing
+  - Uses chat_identifier for session/thread management
+  - Maintains per-chat conversation context
+  - Integrates with analytics using original user_id
 
-#### DALL-E 3 Integration:
-- **Model**: dall-e-3
-- **Standard Size**: 1024x1024 ($0.04)
-- **Quality**: Standard
-- **Style**: Vivid
-- **Error Handling**: Comprehensive API error mapping
-- **Cost Tracking**: Automatic analytics recording
+- `send_image_and_get_response_for_chat(chat_identifier: str, image_path: str, caption: str, user_id: int, username: str = None) -> str`
+  - **NEW**: Chat-based image processing
+  - Uses chat_identifier for session management
+  - Supports dual-mode file tracking and cleanup
 
-### 3. session_manager.py - Redis Session Management & File Lifecycle
-**Purpose**: Persistent storage for user conversation threads and comprehensive file management
+- `add_message_to_context(chat_identifier: str, message: str, user_id: int) -> None`
+  - **NEW**: Adds messages to conversation context without generating responses
+  - Critical for group chat context awareness
+  - Allows bot to understand conversation flow without responding
 
-#### Key Functions:
+- `add_message_to_context_for_chat(chat_identifier: str, message: str, user_id: int) -> None`
+  - **NEW**: Chat-based context addition
+  - Dual-mode version of context processing
+
+### 4. session_manager.py - Redis Session Management (Enhanced for Dual-Mode)
+**Purpose**: Persistent storage for user conversation threads with dual-mode support and comprehensive file management
+
+#### Legacy Functions (Maintained for Backward Compatibility):
 - `get_thread_id(user_id: int) -> str | None`
-  - Retrieves stored thread_id for user
-  - Returns None if no thread exists
-
 - `set_thread_id(user_id: int, thread_id: str)`
-  - Stores thread_id for user persistence
-  - Enables conversation continuity across restarts
-
 - `async reset_thread(user_id: int)`
-  - Deletes stored thread_id and cleans up all associated files
-  - Forces new conversation thread creation
-  - Removes images and documents from OpenAI storage
 
-#### Image Management Functions:
-- `add_user_image(user_id: int, file_id: str)` - Track uploaded images in Redis
-- `get_user_images(user_id: int) -> list[str]` - Retrieve user's image file IDs
-- `clear_user_images(user_id: int)` - Clear image tracking data
-- `async delete_user_images_from_openai(user_id: int)` - Delete images from OpenAI storage
+#### New Dual-Mode Functions:
+- `get_thread_id_for_chat(chat_identifier: str) -> str | None`
+  - **NEW**: Unified thread ID retrieval for any chat type
+  - Handles both user-based and chat-based sessions
+  - Includes legacy fallback for user sessions
 
-#### Document Management Functions:
-- `add_user_document(user_id: int, file_id: str, original_filename: str)` - Track uploaded documents
-- `get_user_documents(user_id: int) -> list[dict]` - Retrieve document metadata
-- `clear_user_documents(user_id: int)` - Clear document tracking data
-- `async delete_user_documents_from_openai(user_id: int)` - Delete documents from OpenAI storage
+- `set_thread_id_for_chat(chat_identifier: str, thread_id: str)`
+  - **NEW**: Unified thread ID storage
+  - Supports both user:{user_id} and chat:{chat_id} patterns
 
-#### Redis Schema:
+- `reset_chat_thread(chat_identifier: str)`
+  - **NEW**: Unified reset functionality for dual-mode
+  - Cleans up threads, images, and documents for any chat type
+
+#### Dual-Mode File Management:
+- `add_chat_image(chat_identifier: str, file_id: str)` - **NEW**: Track images per chat
+- `get_chat_images(chat_identifier: str) -> list[str]` - **NEW**: Retrieve chat images
+- `clear_chat_images(chat_identifier: str)` - **NEW**: Clear chat image tracking
+- `add_chat_document(chat_identifier: str, file_id: str, original_filename: str)` - **NEW**: Track documents per chat
+- `get_chat_documents(chat_identifier: str) -> list[dict]` - **NEW**: Retrieve chat documents
+- `clear_chat_documents(chat_identifier: str)` - **NEW**: Clear chat document tracking
+- `async delete_chat_images_from_openai(chat_identifier: str)` - **NEW**: OpenAI cleanup for chat images
+- `async delete_chat_documents_from_openai(chat_identifier: str)` - **NEW**: OpenAI cleanup for chat documents
+
+#### Redis Schema (Enhanced):
 - **Thread Storage**
-  - **Key Pattern**: `thread_id:{user_id}`
+  - **Key Patterns**: 
+    - `thread:user:{user_id}` (private chats + legacy)
+    - `thread:chat:{chat_id}` (group/supergroup/channel chats)
   - **Value**: OpenAI thread identifier string
   - **TTL**: Persistent (no expiration)
 
-- **Image File Tracking**
-  - **Key Pattern**: `user_images:{user_id}`
-  - **Value**: Redis set of OpenAI file_id strings
+- **File Tracking (Dual-Mode)**
+  - **Key Patterns**:
+    - `chat_images:{chat_identifier}` (replaces user_images for unified approach)
+    - `chat_documents:{chat_identifier}` (replaces user_documents for unified approach)
+  - **Values**: Redis sets/hashes of OpenAI file_id strings with metadata
   - **TTL**: Persistent (cleaned on reset)
 
-- **Document File Tracking**
-  - **Key Pattern**: `user_documents:{user_id}`
-  - **Value**: Redis hash with file_id → original_filename mapping
-  - **TTL**: Persistent (cleaned on reset)
-
-### 4. subscription_checker.py - Authorization System
+### 5. subscription_checker.py - Authorization System
 **Purpose**: Telegram channel subscription verification with caching
 
 #### Key Functions:
@@ -273,7 +275,7 @@ telegram-gpt-bot/
 - **Value**: `"true"` or `"false"`
 - **TTL**: 600 seconds
 
-### 5. config.py - Configuration Management
+### 6. config.py - Configuration Management
 **Purpose**: Environment variable loading and application configuration
 
 #### Configuration Variables:
@@ -288,7 +290,7 @@ REDIS_DB              # Redis database number
 ANALYTICS_DB_PATH     # SQLite analytics database path
 ```
 
-### 6. logger.py - Logging Infrastructure
+### 7. logger.py - Logging Infrastructure
 **Purpose**: Centralized logging configuration
 
 #### Configuration:
@@ -297,7 +299,7 @@ ANALYTICS_DB_PATH     # SQLite analytics database path
 - **Outputs**: File (`bot.log`) + Console (stdout)
 - **Encoding**: UTF-8
 
-### 7. user_analytics.py - User Analytics System
+### 8. user_analytics.py - User Analytics System
 **Purpose**: Comprehensive user analytics and token usage tracking for text and image generation
 
 #### DALL-E Pricing Constants:
@@ -365,7 +367,7 @@ CREATE TABLE user_analytics (
 - **Foundation for Limits**: Infrastructure ready for usage restrictions
 - **Transparent Pricing**: Clear cost display in all operations
 
-### 8. view_analytics.py - Analytics Viewing Tool
+### 9. view_analytics.py - Analytics Viewing Tool
 **Purpose**: Command-line tool for viewing and analyzing user data
 
 #### Usage Modes:
@@ -439,7 +441,7 @@ Example: thread_id:123456789 → "thread_abc123"
 ```
 Key: subscription:{user_id}
 Value: "true" | "false"
-TTL: 600 seconds (10 minutes)
+TTL: 600 seconds
 Example: subscription:123456789 → "true"
 ```
 
@@ -615,6 +617,9 @@ WantedBy=multi-user.target
 - **Image Processing**: Upload success rates, file sizes, format distribution
 - **File Storage**: OpenAI storage usage, cleanup success rates
 - **Cost Control**: Daily/monthly spending trends, user cost distribution
+- **Dual-Mode Performance**: Response filtering accuracy, context processing efficiency
+- **Chat Detection**: Mention detection accuracy, response appropriateness
+- **Session Management**: Thread creation success across chat types
 
 ### Log Analysis
 - Monitor `bot.log` for error patterns
@@ -623,6 +628,9 @@ WantedBy=multi-user.target
 - Watch for OpenAI API rate limiting
 - Track DALL-E generation success rates
 - Monitor cost trends and usage spikes
+- **NEW**: Monitor dual-mode operation patterns
+- **NEW**: Track chat detection accuracy and response filtering
+- **NEW**: Watch for context processing performance in groups
 
 ---
 
@@ -633,6 +641,7 @@ WantedBy=multi-user.target
 - **Type Hints**: Function signatures include type annotations
 - **Error Handling**: Comprehensive try/catch blocks
 - **Logging**: Structured logging with context
+- **Dual-Mode Considerations**: All new features must support both private and group contexts
 
 ### Testing Scenarios
 1. **Subscribed Users**: All functions should work normally
@@ -647,6 +656,11 @@ WantedBy=multi-user.target
 10. **Cost Tracking**: Analytics accuracy, usage limit scenarios
 11. **File Management**: Separate tracking of images vs documents, reset functionality
 12. **Multilingual Support**: Russian and English generation requests
+13. **NEW - Private Chat Mode**: All existing functionality works unchanged
+14. **NEW - Group Chat Mode**: Responds only to mentions, replies, and commands
+15. **NEW - Chat Detection**: Accurate identification of chat types and response triggers
+16. **NEW - Session Isolation**: Private and group conversations remain separate
+17. **NEW - Context Processing**: Bot understands group conversations without inappropriate responses
 
 ### Extension Points
 - **Multiple Channels**: Extend subscription_checker for multi-channel support
@@ -660,9 +674,12 @@ WantedBy=multi-user.target
 - **Document Features**: OCR for scanned documents, table extraction, chart analysis
 - **Batch Processing**: Multiple document uploads and analysis
 - **Document Storage**: Vector store integration for document search and retrieval
+- **NEW - Advanced Chat Modes**: Support for different response behaviors per group
+- **NEW - Group-Specific Features**: Per-group settings, custom commands, role management
+- **NEW - Enhanced Context**: Conversation summarization, topic tracking, user mention history
 
 ---
 
-**Last Updated**: June 29, 2025, 17:50 MSK  
-**Document Version**: 1.4  
-**Project Version**: 1.7.0 
+**Last Updated**: June 29, 2025, 19:50 MSK  
+**Document Version**: 1.5  
+**Project Version**: 1.8.0 

@@ -9,14 +9,31 @@ import re
 from telegram import Update, BotCommand
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
 from config import TELEGRAM_BOT_TOKEN, CHANNEL_ID
-from openai_handler import send_message_and_get_response, get_message_history, export_message_history, send_image_and_get_response, detect_image_generation_request, generate_image_dalle, send_document_and_get_response
-from session_manager import reset_thread
+from openai_handler import send_message_and_get_response, send_message_and_get_response_for_chat, add_message_to_context, add_message_to_context_for_chat, get_message_history, export_message_history, send_image_and_get_response, send_image_and_get_response_for_chat, detect_image_generation_request, generate_image_dalle, send_document_and_get_response
+from session_manager import reset_thread, reset_chat_thread, get_thread_id_for_chat, set_thread_id_for_chat
 from telegram.constants import ChatAction
 from subscription_checker import check_channel_subscription
 from user_analytics import analytics
+from chat_detector import (
+    should_process_message, should_respond_in_chat, get_chat_identifier, get_log_context, 
+    is_private_chat, is_group_chat
+)
 
 # Путь до лог-файла
 LOG_FILE = os.path.join(os.path.dirname(__file__), "bot.log")
+
+# Bot information for dual-mode operation
+bot_info = {"username": None, "id": None}
+
+async def init_bot_info(bot):
+    """Initialize bot information for dual-mode operation"""
+    try:
+        bot_user = await bot.get_me()
+        bot_info["username"] = bot_user.username
+        bot_info["id"] = bot_user.id
+        logger.info(f"Bot initialized: @{bot_info['username']} (ID: {bot_info['id']})")
+    except Exception as e:
+        logger.error(f"Failed to get bot info: {e}")
 
 def get_username(update: Update) -> str:
     """
@@ -48,9 +65,14 @@ async def is_authorized_async(user_id: int) -> bool:
         return False
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Check if bot should respond in this chat context
+    if not should_respond_in_chat(update, bot_info["username"], bot_info["id"]):
+        return  # Ignore start command in group chats without mention/reply
+    
     user_id = update.effective_user.id
     username = update.effective_user.username or "Unknown"
-    logger.info(f"[Start] User {user_id} (@{username}) started the bot")
+    log_context = get_log_context(update)
+    logger.info(f"[Start] {log_context}")
     
     if not await is_authorized_async(user_id):
         await update.message.reply_text(
@@ -76,34 +98,60 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
     
-    await update.message.reply_text(
-        "🤖 <b>Добро пожаловать в Telegram GPT Bot!</b>\n\n"
-        "Я - ваш персональный AI-ассистент с уникальными возможностями:\n"
-        "• 💬 <b>Умные диалоги</b> - понимаю контекст и веду осмысленные беседы\n"
-        "• 🧠 <b>Память</b> - помню всю нашу историю общения\n"
-        "• 📚 <b>Непрерывность</b> - наш диалог продолжится даже после перерывов\n"
-        "• 🖼️ <b>Анализ изображений</b> - могу анализировать и описывать картинки\n"
-        "• 📄 <b>Работа с документами</b> - анализирую PDF, TXT, DOCX файлы\n"
-        "• 🎨 <b>Генерация изображений</b> - создаю картинки по вашим описаниям\n"
-        "• 📁 <b>Сохранение</b> - можете экспортировать любую беседу\n\n"
-        "<b>Как пользоваться:</b>\n"
-        "• Напишите мне любое текстовое сообщение\n"
-        "• Отправьте изображение с подписью или без\n"
-        "• Прикрепите документ (PDF, TXT, DOCX) с вопросом или без\n"
-        "• <code>/reset</code> - начать новую беседу с чистого листа\n"
-        "• <code>/history</code> - посмотреть последние сообщения\n"
-        "• <code>/export</code> - скачать всю историю общения\n"
-        "• <code>/subscribe</code> - проверить статус доступа\n\n"
-        "🔒 <b>Конфиденциальность:</b>\n"
-        "• Ваш диалог с ботом видите только <b>вы</b>\n"
-        "• История сохраняется на серверах OpenAI (как у ChatGPT)\n"
-        "• Ваши сообщения защищены наравне с миллиардами диалогов других пользователей\n"
-        "• Никто другой не имеет доступа к вашей переписке\n\n"
-        "Готов помочь с любыми вопросами! Начните просто написав мне сообщение или отправив изображение 🚀",
-        parse_mode='HTML'
-    )
+    # Provide context-appropriate welcome message
+    if is_private_chat(update):
+        await update.message.reply_text(
+            "🤖 <b>Добро пожаловать в Telegram GPT Bot!</b>\n\n"
+            "Я - ваш персональный AI-ассистент с уникальными возможностями:\n"
+            "• 💬 <b>Умные диалоги</b> - понимаю контекст и веду осмысленные беседы\n"
+            "• 🧠 <b>Память</b> - помню всю нашу историю общения\n"
+            "• 📚 <b>Непрерывность</b> - наш диалог продолжится даже после перерывов\n"
+            "• 🖼️ <b>Анализ изображений</b> - могу анализировать и описывать картинки\n"
+            "• 📄 <b>Работа с документами</b> - анализирую PDF, TXT, DOCX файлы\n"
+            "• 🎨 <b>Генерация изображений</b> - создаю картинки по вашим описаниям\n"
+            "• 📁 <b>Сохранение</b> - можете экспортировать любую беседу\n\n"
+            "<b>Как пользоваться:</b>\n"
+            "• Напишите мне любое текстовое сообщение\n"
+            "• Отправьте изображение с подписью или без\n"
+            "• Прикрепите документ (PDF, TXT, DOCX) с вопросом или без\n"
+            "• <code>/reset</code> - начать новую беседу с чистого листа\n"
+            "• <code>/history</code> - посмотреть последние сообщения\n"
+            "• <code>/export</code> - скачать всю историю общения\n"
+            "• <code>/subscribe</code> - проверить статус доступа\n\n"
+            "🔒 <b>Конфиденциальность:</b>\n"
+            "• Ваш диалог с ботом видите только <b>вы</b>\n"
+            "• История сохраняется на серверах OpenAI (как у ChatGPT)\n"
+            "• Ваши сообщения защищены наравне с миллиардами диалогов других пользователей\n"
+            "• Никто другой не имеет доступа к вашей переписке\n\n"
+            "Готов помочь с любыми вопросами! Начните просто написав мне сообщение или отправив изображение 🚀",
+            parse_mode='HTML'
+        )
+    else:
+        await update.message.reply_text(
+            "🤖 <b>Привет! Я Telegram GPT Bot</b>\n\n"
+            "Теперь я работаю в этом чате! Мои возможности:\n"
+            "• 💬 <b>Умные диалоги</b> - отвечаю на упоминания и в ответах\n"
+            "• 🧠 <b>Память чата</b> - помню контекст беседы в этом чате\n"
+            "• 🖼️ <b>Анализ изображений</b> - могу анализировать картинки\n"
+            "• 📄 <b>Работа с документами</b> - анализирую PDF, TXT, DOCX файлы\n"
+            "• 🎨 <b>Генерация изображений</b> - создаю картинки по описаниям\n\n"
+            "<b>Как со мной общаться в группе:</b>\n"
+            f"• Упомяните меня: <code>@{bot_info['username']} ваш вопрос</code>\n"
+            "• Ответьте на мое сообщение\n"
+            "• Используйте команды: <code>/reset</code>, <code>/start</code>\n\n"
+            "🔒 <b>Приватность:</b>\n"
+            "• История чата сохраняется отдельно для каждой группы\n"
+            "• Данные защищены как у ChatGPT\n"
+            "• Доступ к боту только у подписчиков @logloss_notes\n\n"
+            f"Готов помочь! Упомяните меня <code>@{bot_info['username']}</code> с вашим вопросом 🚀",
+            parse_mode='HTML'
+        )
 
 async def reset(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Check if bot should respond in this chat context
+    if not should_respond_in_chat(update, bot_info["username"], bot_info["id"]):
+        return  # Ignore reset command in group chats without mention/reply
+    
     user_id = update.effective_user.id
     if not await is_authorized_async(user_id):
         await update.message.reply_text(
@@ -114,24 +162,69 @@ async def reset(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
     
-    await reset_thread(user_id)
-    await update.message.reply_text("🔄 История и файлы сброшены. Новая беседа начата!")
+    chat_identifier = get_chat_identifier(update)
+    log_context = get_log_context(update)
+    
+    # Use dual-mode reset
+    await reset_chat_thread(chat_identifier)
+    
+    # Provide appropriate response based on chat type
+    if is_private_chat(update):
+        await update.message.reply_text("🔄 История и файлы сброшены. Новая беседа начата!")
+    else:
+        await update.message.reply_text("🔄 История беседы в этом чате сброшена. Новая беседа начата!")
+    
+    logger.info(f"{log_context} - Reset completed")
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # First check if we should process this message at all
+    if not should_process_message(update):
+        return  # Ignore system messages, other bots, etc.
+    
     user_id = update.effective_user.id
-    if not await is_authorized_async(user_id):
-        await update.message.reply_text(
-            "🚫 Доступ к боту ограничен!\n\n"
-            "Для использования бота необходимо подписаться на канал:\n"
-            "👉 https://t.me/logloss_notes\n\n"
-            "После подписки попробуйте снова."
-        )
+    # Handle both text messages and captions (for context tracking)
+    user_message = update.message.text or update.message.caption
+    
+    # Skip if no text content to process
+    if not user_message:
         return
     
-    user_message = update.message.text
     username = get_username(update)
+    chat_identifier = get_chat_identifier(update)
+    log_context = get_log_context(update)
+    
+    # Check authorization - required for both processing and responding
+    if not await is_authorized_async(user_id):
+        # Only show authorization message if bot should respond
+        if should_respond_in_chat(update, bot_info["username"], bot_info["id"]):
+            await update.message.reply_text(
+                "🚫 Доступ к боту ограничен!\n\n"
+                "Для использования бота необходимо подписаться на канал:\n"
+                "👉 https://t.me/logloss_notes\n\n"
+                "После подписки попробуйте снова."
+            )
+        return
+    
+    # Check if we should respond to this message
+    should_respond = should_respond_in_chat(update, bot_info["username"], bot_info["id"])
+    
+    logger.info(f"{log_context}: {user_message} {'[RESPOND]' if should_respond else '[CONTEXT]'}")
+    
+    # If we shouldn't respond, just add to context and return
+    if not should_respond:
+        try:
+            if is_private_chat(update):
+                # This shouldn't happen in private chats, but handle it anyway
+                await add_message_to_context(user_id, user_message, username)
+            else:
+                # Add group message to context without responding
+                await add_message_to_context_for_chat(chat_identifier, user_message, username, user_id)
+        except Exception as context_error:
+            logger.error(f"Error adding message to context {log_context}: {context_error}")
+        return
+    
+    # From here on, we're responding to the message
     await update.message.chat.send_action(action="typing")
-    logger.info(f"Message from {user_id} (@{username}): {user_message}")
 
     # NEW: Image generation detection
     if await detect_image_generation_request(user_message):
@@ -145,7 +238,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
     try:
-        reply = await send_message_and_get_response(user_id, user_message, username)
+        # Use dual-mode session management
+        if is_private_chat(update):
+            # For private chats, use legacy user_id based system
+            reply = await send_message_and_get_response(user_id, user_message, username)
+        else:
+            # For group chats, use chat-based system
+            reply = await send_message_and_get_response_for_chat(chat_identifier, user_message, username, user_id)
         
         # Конвертируем Markdown в HTML для красивого отображения
         formatted_reply = markdown_to_html(reply)
@@ -159,7 +258,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(formatted_reply, parse_mode='HTML')
             
     except Exception as message_processing_error:
-        logger.error(f"Error processing message from user {user_id}: {message_processing_error}")
+        logger.error(f"Error processing message {log_context}: {message_processing_error}")
         # Replace processing message with error message
         try:
             await processing_message.edit_text("❌ Произошла ошибка при обработке запроса. Попробуйте еще раз.")
@@ -168,21 +267,40 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle photo messages with optional caption"""
-    user_id = update.effective_user.id
-    if not await is_authorized_async(user_id):
-        await update.message.reply_text(
-            "🚫 Доступ к боту ограничен!\n\n"
-            "Для использования бота необходимо подписаться на канал:\n"
-            "👉 https://t.me/logloss_notes\n\n"
-            "После подписки попробуйте снова."
-        )
-        return
+    # First check if we should process this message at all
+    if not should_process_message(update):
+        return  # Ignore system messages, other bots, etc.
     
+    user_id = update.effective_user.id
     username = get_username(update)
     caption = update.message.caption or ""
+    chat_identifier = get_chat_identifier(update)
+    log_context = get_log_context(update)
     
+    # Check authorization - required for both processing and responding
+    if not await is_authorized_async(user_id):
+        # Only show authorization message if bot should respond
+        if should_respond_in_chat(update, bot_info["username"], bot_info["id"]):
+            await update.message.reply_text(
+                "🚫 Доступ к боту ограничен!\n\n"
+                "Для использования бота необходимо подписаться на канал:\n"
+                "👉 https://t.me/logloss_notes\n\n"
+                "После подписки попробуйте снова."
+            )
+        return
+    
+    # Check if we should respond to this message
+    should_respond = should_respond_in_chat(update, bot_info["username"], bot_info["id"])
+    
+    logger.info(f"{log_context} - Photo with caption: {caption} {'[RESPOND]' if should_respond else '[CONTEXT]'}")
+    
+    # Photos require response processing, so if we shouldn't respond, skip
+    # (Unlike text messages, we don't add photos to context without processing them)
+    if not should_respond:
+        return
+    
+    # From here on, we're responding to the photo
     await update.message.chat.send_action(action="typing")
-    logger.info(f"Photo message from {user_id} (@{username}) with caption: {caption}")
     
     try:
         # Get the largest photo size
@@ -221,8 +339,13 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode='HTML'
         )
         
-        # Process image with OpenAI
-        reply = await send_image_and_get_response(user_id, str(temp_file_path), caption, username)
+        # Process image with OpenAI using dual-mode
+        if is_private_chat(update):
+            # For private chats, use legacy user_id based system
+            reply = await send_image_and_get_response(user_id, str(temp_file_path), caption, username)
+        else:
+            # For group chats, use chat-based system
+            reply = await send_image_and_get_response_for_chat(chat_identifier, str(temp_file_path), caption, username, user_id)
         
         # Конвертируем Markdown в HTML для красивого отображения
         formatted_reply = markdown_to_html(reply)
@@ -595,6 +718,9 @@ def main():
     
     app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
 
+    # Инициализируем информацию о боте для dual-mode operation
+    app.job_queue.run_once(lambda context: asyncio.create_task(init_bot_info(context.bot)), when=0.5)
+    
     # Устанавливаем меню команд
     app.job_queue.run_once(lambda context: asyncio.create_task(setup_bot_commands(context.bot)), when=1)
 
