@@ -14,8 +14,8 @@
 ## 🎯 Project Overview
 
 **Project Name:** Telegram GPT Bot  
-**Current Version:** 1.8.0  
-**Last Updated:** June 29, 2025  
+**Current Version:** 1.8.1  
+**Last Updated:** June 30, 2025  
 **Status:** ✅ Production Ready  
 **Repository:** telegram-gpt-bot  
 
@@ -34,6 +34,7 @@
 
 | Version | Release Date | Status | Key Feature |
 |---------|--------------|---------|-------------|
+| **1.8.1** | Jun 30, 2025 | ✅ Complete | Topic-Based Context Isolation for Supergroups |
 | **1.8.0** | Jun 29, 2025 | ✅ Complete | Dual-Mode Bot Operation (Private + Group/Channel) |
 | **1.7.0** | Jun 28, 2025 | ✅ Complete | Document File Attachment Support |
 | **1.6.0** | Jun 28, 2025 | ✅ Complete | DALL-E Image Generation |
@@ -48,29 +49,73 @@
 
 ## 🚀 Latest Release
 
-### Version 1.8.0 - Dual-Mode Bot Operation (Private + Group/Channel)
-**Release Date:** June 29, 2025  
-**Development Time:** ~4 hours  
-**Status:** ✅ Production Ready  
+### Version 1.8.1 - Topic-Based Context Isolation for Supergroups
+**Release Date:** June 30, 2025  
+**Development Time:** ~2 hours  
+**Status:** ✅ Production Ready - Ready for Testing  
 
 #### 🎯 Key Features
-- **Dual-Mode Operation:** Private chat + Group/Channel administrator mode
-- **Smart Context Processing:** Bot sees all group messages for context
-- **Intelligent Response Filtering:** Responds only to mentions and replies in groups
-- **Separate Session Management:** Per-channel conversation threads
-- **Unified Authorization:** Same subscription requirement across both modes
-- **Full Backward Compatibility:** Private chat functionality unchanged
+- **Topic Isolation:** Separate conversation contexts for each supergroup topic/forum thread
+- **Enhanced Session Management:** Topic-aware identifiers (`chat:{id}:topic:{thread_id}`)
+- **Improved Logging:** Topic information included in debug logs
+- **Backward Compatibility:** All existing functionality preserved
+- **Zero Breaking Changes:** Private chats and regular groups work exactly as before
 
 #### 📈 Impact
-- **New Modules:** `chat_detector.py` for dual-mode logic
-- **Enhanced Session Management:** Chat-based Redis key strategy  
-- **Core Integration:** All handlers support dual-mode operation
-- **Lines Modified:** ~800+ across 4 core files
-- **Testing:** User confirmed "works perfectly"
+- **Enhanced Functions:** `get_chat_identifier()` and `get_log_context()` in `chat_detector.py`
+- **New Detection Logic:** Topic thread detection and ID extraction
+- **Session Strategy:** Topic-specific Redis keys for supergroup forum conversations
+- **Documentation:** Updated project documentation and implementation plan
+- **Testing Ready:** Comprehensive test scenarios provided
 
 ---
 
 ## 📚 Version Details
+
+### Version 1.8.1 - Topic-Based Context Isolation for Supergroups
+*June 30, 2025 10:15 MSK*
+
+**Implementation Focus:** Enable isolated conversation contexts for each topic in supergroups with forum/topics enabled
+
+**Problem Solved:** Bot was mixing conversation contexts between different topics in the same supergroup, causing confusion when users discussed different subjects in separate forum threads
+
+**Core Changes:**
+- Enhanced `get_chat_identifier()` to detect and include `message_thread_id` for supergroup topics
+- Added `has_topic_thread()` helper function to detect supergroup forum messages
+- Added `get_topic_thread_id()` helper function to extract topic thread IDs
+- Enhanced `get_log_context()` to include topic information in debug logs
+- Updated project documentation with topic isolation details
+
+**Technical Architecture:**
+- **Private Chats:** `user:{user_id}` → OpenAI thread (unchanged)
+- **Regular Groups:** `chat:{chat_id}` → OpenAI thread (unchanged)
+- **Supergroups (no topics):** `chat:{chat_id}` → OpenAI thread (unchanged)
+- **Supergroups (with topics):** `chat:{chat_id}:topic:{thread_id}` → OpenAI thread (NEW)
+
+**Session Management Enhancement:**
+- Topic-specific Redis keys ensure complete isolation between forum threads
+- Backward compatibility maintained for all existing chat types
+- No database migrations required - existing sessions continue working
+- Session cleanup and file management work seamlessly with new identifiers
+
+**Logging Improvements:**
+- Enhanced log context includes topic information for better debugging
+- Format: `[Supergroup] user_123(@username) in chat_-456(GroupName) | Topic: 5`
+- Maintains existing log format for non-topic messages
+
+**Files Modified:**
+- `chat_detector.py` - Enhanced chat identifier generation and logging
+- `docs/project-index.md` - Updated documentation with topic isolation details
+- `docs/implementation-plan.md` - Comprehensive implementation plan created
+
+**Testing Strategy:**
+- **Topic Isolation Test:** Create supergroup with multiple topics, verify separate contexts
+- **Backward Compatibility Test:** Ensure private chats and regular groups work unchanged
+- **Session Identifier Test:** Verify correct Redis key generation for each chat type
+
+**Risk Assessment:** Low - Changes contained within identifier generation logic, no breaking changes to existing functionality
+
+---
 
 ### Version 1.8.0 - Dual-Mode Bot Operation (Private + Group/Channel)
 *June 29, 2025 21:56 MSK*

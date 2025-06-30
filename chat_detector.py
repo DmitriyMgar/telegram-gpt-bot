@@ -245,16 +245,56 @@ def should_respond_in_chat(update: Update, bot_username: str, bot_id: int) -> bo
     return False
 
 
+def has_topic_thread(update: Update) -> bool:
+    """
+    Checks if the message is from a supergroup with forum topics enabled.
+    
+    Args:
+        update: Telegram Update object
+        
+    Returns:
+        bool: True if message has topic thread_id, False otherwise
+    """
+    if not update.message:
+        return False
+    
+    # Check if message has message_thread_id (indicates supergroup topic)
+    return hasattr(update.message, 'message_thread_id') and update.message.message_thread_id is not None
+
+
+def get_topic_thread_id(update: Update) -> Optional[int]:
+    """
+    Gets the topic thread ID from the message if available.
+    
+    Args:
+        update: Telegram Update object
+        
+    Returns:
+        Optional[int]: Topic thread ID if available, None otherwise
+    """
+    if not update.message:
+        return None
+    
+    return getattr(update.message, 'message_thread_id', None)
+
+
 def get_chat_identifier(update: Update) -> str:
     """
     Gets a unique identifier for the chat context.
     Used for session management in dual-mode operation.
+    Enhanced to support topic-based isolation in supergroups.
     
     Args:
         update: Telegram Update object
         
     Returns:
         str: Unique chat identifier for session management
+        
+    Examples:
+        - Private chat: "user:123456789"
+        - Regular group: "chat:-123456789"
+        - Supergroup without topics: "chat:-123456789"
+        - Supergroup with topics: "chat:-123456789:topic:5"
     """
     chat_type = get_chat_type(update)
     
@@ -263,18 +303,32 @@ def get_chat_identifier(update: Update) -> str:
         return f"user:{update.effective_user.id}"
     else:
         # For group chats, use chat_id
-        return f"chat:{update.effective_chat.id}"
+        base_identifier = f"chat:{update.effective_chat.id}"
+        
+        # Check if this is a supergroup with topics
+        if chat_type == ChatType.SUPERGROUP and has_topic_thread(update):
+            topic_id = get_topic_thread_id(update)
+            return f"{base_identifier}:topic:{topic_id}"
+        
+        return base_identifier
 
 
 def get_log_context(update: Update) -> str:
     """
     Creates a contextual string for logging purposes.
+    Enhanced to include topic information for supergroups.
     
     Args:
         update: Telegram Update object
         
     Returns:
         str: Formatted string for logging
+        
+    Examples:
+        - Private: "[Private] user_123(@john)"
+        - Group: "[Group] user_123(@john) in chat_-456(My Group)"
+        - Supergroup: "[Supergroup] user_123(@john) in chat_-456(My Supergroup)"
+        - Supergroup with topic: "[Supergroup] user_123(@john) in chat_-456(My Supergroup) | Topic: 5"
     """
     chat_type = get_chat_type(update)
     user = update.effective_user
@@ -290,4 +344,12 @@ def get_log_context(update: Update) -> str:
         chat_info = f"chat_{chat.id}"
         if chat.title:
             chat_info += f"({chat.title})"
-        return f"[{chat_type.value.title()}] {user_info} in {chat_info}" 
+        
+        base_context = f"[{chat_type.value.title()}] {user_info} in {chat_info}"
+        
+        # Add topic information for supergroups with topics
+        if chat_type == ChatType.SUPERGROUP and has_topic_thread(update):
+            topic_id = get_topic_thread_id(update)
+            base_context += f" | Topic: {topic_id}"
+        
+        return base_context 

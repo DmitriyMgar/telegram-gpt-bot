@@ -119,13 +119,16 @@ telegram-gpt-bot/
 - `export(update, context)` - Export chat history as file
 - `subscribe(update, context)` - Check subscription status
 
-#### Dual-Mode Behavior:
-| Chat Type    | Response Logic                                    | Session Management    |
-|--------------|--------------------------------------------------|-----------------------|
-| Private      | Responds to all messages (unchanged)             | `user:{user_id}`      |
-| Group        | Responds to mentions, replies, commands only     | `chat:{chat_id}`      |
-| Supergroup   | Responds to mentions, replies, commands only     | `chat:{chat_id}`      |
-| Channel      | Responds to commands only                        | `chat:{chat_id}`      |
+#### Dual-Mode Behavior with Topic Isolation:
+| Chat Type                 | Response Logic                                    | Session Management                    |
+|---------------------------|---------------------------------------------------|---------------------------------------|
+| Private                   | Responds to all messages (unchanged)             | `user:{user_id}`                      |
+| Group                     | Responds to mentions, replies, commands only     | `chat:{chat_id}`                      |
+| Supergroup (no topics)   | Responds to mentions, replies, commands only     | `chat:{chat_id}`                      |
+| Supergroup (with topics) | Responds to mentions, replies, commands only     | `chat:{chat_id}:topic:{thread_id}`    |
+| Channel                   | Responds to commands only                        | `chat:{chat_id}`                      |
+
+**🎯 Topic Isolation Enhancement**: Supergroups with forum topics now maintain separate conversation contexts for each topic, preventing context mixing between different discussion threads.
 
 ### 2. chat_detector.py - Chat Detection System (NEW)
 **Purpose**: Intelligent chat type detection and response filtering for dual-mode operation
@@ -157,13 +160,21 @@ telegram-gpt-bot/
   - Processes ALL group messages for conversation awareness
   - Separate from response logic for better context tracking
 
-- `get_chat_identifier(update) -> str`
-  - Generates unique session identifiers for Redis storage
-  - Format: `user:{user_id}` for private, `chat:{chat_id}` for groups
+- `has_topic_thread(update) -> bool` - **NEW**
+  - Checks if message is from a supergroup with forum topics enabled
+  - Detects presence of `message_thread_id` field
 
-- `get_log_context(update) -> str`
-  - Creates contextual logging strings for debugging
-  - Includes chat type, user info, and message context
+- `get_topic_thread_id(update) -> Optional[int]` - **NEW** 
+  - Extracts topic thread ID from supergroup forum messages
+  - Returns None for non-topic messages
+
+- `get_chat_identifier(update) -> str` - **ENHANCED**
+  - Generates unique session identifiers for Redis storage with topic support
+  - Formats: `user:{user_id}` for private, `chat:{chat_id}` for groups, `chat:{chat_id}:topic:{thread_id}` for supergroup topics
+
+- `get_log_context(update) -> str` - **ENHANCED**
+  - Creates contextual logging strings for debugging with topic information
+  - Includes chat type, user info, message context, and topic ID for supergroups
 
 ### 3. openai_handler.py - OpenAI Integration (Enhanced for Dual-Mode)
 **Purpose**: Manages OpenAI Assistant API interactions with dual-mode support
