@@ -66,7 +66,7 @@ async def send_message_and_get_response(user_id: int, user_message: str, usernam
             message.created_at >= run.created_at
         ):
             reply = message.content[0].text.value
-            logger.info(f"[OpenAI] Reply to {user_id}: {reply}")
+            logger.info(f"[OpenAI] Response sent to user {user_id}")
             return reply
 
     return "Ошибка: не удалось получить ответ."
@@ -95,7 +95,7 @@ async def add_message_to_context(user_id: int, user_message: str, username: str 
             role="user",
             content=user_message
         )
-        logger.debug(f"Added context message for user {user_id}: {user_message[:50]}...")
+        logger.debug(f"Added context message for user {user_id}")
     except Exception as e:
         logger.error(f"Error adding message to context for user {user_id}: {e}")
 
@@ -124,7 +124,7 @@ async def add_message_to_context_for_chat(chat_identifier: str, user_message: st
             role="user",
             content=user_message
         )
-        logger.debug(f"Added context message for {chat_identifier}: {user_message[:50]}...")
+        logger.debug(f"Added context message for {chat_identifier}")
     except Exception as e:
         logger.error(f"Error adding message to context for {chat_identifier}: {e}")
 
@@ -197,7 +197,7 @@ async def send_message_and_get_response_for_chat(chat_identifier: str, user_mess
             message.created_at >= run.created_at
         ):
             reply = message.content[0].text.value
-            logger.info(f"[OpenAI] Reply for {chat_identifier}: {reply}")
+            logger.info(f"[OpenAI] Response sent for {chat_identifier}")
             return reply
 
     return "Ошибка: не удалось получить ответ."
@@ -336,7 +336,7 @@ async def send_image_and_get_response(user_id: int, image_path: str, caption: st
                 message.created_at >= run.created_at
             ):
                 reply = message.content[0].text.value
-                logger.info(f"[OpenAI] Image analysis reply to {user_id}: {reply[:100]}...")
+                logger.info(f"[OpenAI] Image analysis completed for user {user_id}")
                 
                 # Файл НЕ удаляется сразу - будет удален при команде /reset
                 logger.debug(f"File {uploaded_file.id} stored for user {user_id}, will be cleaned on /reset")
@@ -459,7 +459,7 @@ async def send_image_and_get_response_for_chat(chat_identifier: str, image_path:
                 message.created_at >= run.created_at
             ):
                 reply = message.content[0].text.value
-                logger.info(f"[OpenAI] Image analysis reply for {chat_identifier}: {reply[:100]}...")
+                logger.info(f"[OpenAI] Image analysis completed for {chat_identifier}")
                 
                 # File НЕ удаляется сразу - will be cleaned on /reset
                 logger.debug(f"File {uploaded_file.id} stored for {chat_identifier}, will be cleaned on /reset")
@@ -555,7 +555,7 @@ async def send_document_and_get_response(user_id: int, local_file_path: str, use
                 message.created_at >= run.created_at
             ):
                 reply = message.content[0].text.value
-                logger.info(f"[OpenAI] Document analysis reply to {user_id}: {reply[:100]}...")
+                logger.info(f"[OpenAI] Document analysis completed for user {user_id}")
                 
                 # File will be cleaned up during /reset
                 logger.debug(f"Document file {uploaded_file.id} stored for user {user_id}, will be cleaned on /reset")
@@ -603,7 +603,7 @@ async def generate_image_dalle(prompt: str, user_id: int, username: str = None,
     Returns: (image_url, equivalent_tokens)
     """
     try:
-        logger.info(f"[DALL-E] Generating image for user {user_id}: {prompt[:50]}...")
+        logger.info(f"[DALL-E] Starting image generation for user {user_id}")
         
         response = await client.images.generate(
             model="dall-e-3",

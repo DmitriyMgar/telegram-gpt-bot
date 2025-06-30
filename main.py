@@ -208,7 +208,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Check if we should respond to this message
     should_respond = should_respond_in_chat(update, bot_info["username"], bot_info["id"])
     
-    logger.info(f"{log_context}: {user_message} {'[RESPOND]' if should_respond else '[CONTEXT]'}")
+    logger.info(f"{log_context} - Message received {'[RESPOND]' if should_respond else '[CONTEXT]'}")
     
     # If we shouldn't respond, just add to context and return
     if not should_respond:
@@ -292,7 +292,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Check if we should respond to this message
     should_respond = should_respond_in_chat(update, bot_info["username"], bot_info["id"])
     
-    logger.info(f"{log_context} - Photo with caption: {caption} {'[RESPOND]' if should_respond else '[CONTEXT]'}")
+    logger.info(f"{log_context} - Photo received {'[RESPOND]' if should_respond else '[CONTEXT]'}")
     
     # Photos require response processing, so if we shouldn't respond, skip
     # (Unlike text messages, we don't add photos to context without processing them)
@@ -439,7 +439,7 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     
     await update.message.chat.send_action(action="typing")
-    logger.info(f"Document message from {user_id} (@{username}): {document.file_name} ({document.mime_type}) with caption: {caption}")
+    logger.info(f"Document processing started for user {user_id} (@{username}): {document.mime_type}")
     
     # Processing message
     processing_message = await update.message.reply_text(
@@ -534,7 +534,7 @@ async def handle_image_generation_request(update: Update, context: ContextTypes.
         # Remove processing message
         await processing_message.delete()
         
-        logger.info(f"Generated image for user {user_id}: {prompt[:50]}...")
+        logger.info(f"Image generation completed for user {user_id}")
         
     except Exception as image_generation_error:
         error_message = str(image_generation_error) if str(image_generation_error) else "Image generation failed"
