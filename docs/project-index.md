@@ -3,7 +3,7 @@
 ## Project Overview
 
 **Project Name:** Telegram GPT Bot  
-**Version:** 1.8.0  
+**Version:** 1.8.2  
 **Language:** Python 3.8+  
 **Architecture:** Asynchronous, microservice-style modular design  
 **Primary Purpose:** Channel-subscription-gated Telegram bot with OpenAI Assistant integration, DALL-E image generation, document processing, user analytics, comprehensive file handling, and **dual-mode operation** (private chats + group/channel administrator mode)
@@ -24,6 +24,7 @@
 - **File Management**: Comprehensive lifecycle management for images and documents with automatic cleanup
 - **Caching System**: Intelligent Redis caching for subscription status optimization
 - **Smart Message Filtering**: Context-aware response logic for group conversations
+- **Network Error Resilience**: Automatic recovery from Telegram API outages with exponential backoff
 
 ---
 

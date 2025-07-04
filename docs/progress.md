@@ -14,8 +14,8 @@
 ## 🎯 Project Overview
 
 **Project Name:** Telegram GPT Bot  
-**Current Version:** 1.8.1  
-**Last Updated:** June 30, 2025  
+**Current Version:** 1.8.2  
+**Last Updated:** July 4, 2025  
 **Status:** ✅ Production Ready  
 **Repository:** telegram-gpt-bot  
 
@@ -27,6 +27,7 @@
 - Channel subscription authorization
 - User analytics and cost tracking
 - Redis session management
+- Network error resilience and auto-recovery
 
 ---
 
@@ -34,6 +35,7 @@
 
 | Version | Release Date | Status | Key Feature |
 |---------|--------------|---------|-------------|
+| **1.8.2** | Jul 4, 2025 | ✅ Complete | Network Error Resilience & Auto-Recovery |
 | **1.8.1** | Jun 30, 2025 | ✅ Complete | Topic-Based Context Isolation for Supergroups |
 | **1.8.0** | Jun 29, 2025 | ✅ Complete | Dual-Mode Bot Operation (Private + Group/Channel) |
 | **1.7.0** | Jun 28, 2025 | ✅ Complete | Document File Attachment Support |
@@ -49,28 +51,94 @@
 
 ## 🚀 Latest Release
 
-### Version 1.8.1 - Topic-Based Context Isolation for Supergroups
-**Release Date:** June 30, 2025  
+### Version 1.8.2 - Network Error Resilience & Auto-Recovery
+**Release Date:** July 4, 2025  
 **Development Time:** ~2 hours  
-**Status:** ✅ Production Ready - Ready for Testing  
+**Status:** ✅ Production Ready - Deployed  
 
 #### 🎯 Key Features
-- **Topic Isolation:** Separate conversation contexts for each supergroup topic/forum thread
-- **Enhanced Session Management:** Topic-aware identifiers (`chat:{id}:topic:{thread_id}`)
-- **Improved Logging:** Topic information included in debug logs
-- **Backward Compatibility:** All existing functionality preserved
-- **Zero Breaking Changes:** Private chats and regular groups work exactly as before
+- **Network Error Handling:** Robust handling of Telegram API network errors (Bad Gateway, NetworkError, TimedOut)
+- **Auto-Recovery System:** Automatic reconnection with exponential backoff (up to 5 retry attempts)
+- **Optimized Connection Settings:** HTTPXRequest with proper timeout configurations for stable API communication
+- **Graceful Shutdown:** Proper application lifecycle management with cleanup procedures
+- **Signal Handling:** SIGINT/SIGTERM signal processing for controlled bot shutdown
 
 #### 📈 Impact
-- **Enhanced Functions:** `get_chat_identifier()` and `get_log_context()` in `chat_detector.py`
-- **New Detection Logic:** Topic thread detection and ID extraction
-- **Session Strategy:** Topic-specific Redis keys for supergroup forum conversations
-- **Documentation:** Updated project documentation and implementation plan
-- **Testing Ready:** Comprehensive test scenarios provided
+- **Eliminated:** `NetworkError: Bad Gateway` crashes causing bot restarts
+- **Improved:** Bot uptime and reliability during Telegram API outages
+- **Enhanced:** Connection stability with optimized timeout settings
+- **Reduced:** Manual intervention required for network-related issues
+- **Strengthened:** Production deployment resilience
+
+#### 🔧 Technical Implementation
+- **Retry Logic:** Exponential backoff (1s, 2s, 4s, 8s, 16s) with maximum 5 attempts
+- **Connection Timeouts:** Read (60s), Write (60s), Connect (30s), Pool (20s)
+- **Long Polling:** Enhanced timeout (120s) for getUpdates requests
+- **Signal Handling:** Async event-based shutdown mechanism with proper cleanup
+- **Error Categories:** Specific handling for NetworkError, TimedOut, and TelegramError types
 
 ---
 
 ## 📚 Version Details
+
+### Version 1.8.2 - Network Error Resilience & Auto-Recovery
+*July 4, 2025 13:08 MSK*
+
+**Implementation Focus:** Eliminate network-related bot crashes and implement automated recovery mechanisms
+
+**Problem Solved:** Bot was crashing with `NetworkError: Bad Gateway` errors during Telegram API outages, requiring manual restarts and causing service interruptions
+
+**Core Changes:**
+- Completely rewrote `main()` function with comprehensive error handling
+- Implemented `HTTPXRequest` with optimized timeout configurations
+- Added exponential backoff retry mechanism with intelligent error categorization
+- Created `cleanup_app()` function for safe application shutdown and restart
+- Replaced problematic `idle()` methods with proper async signal handling
+- Added `setup_handlers()` function for asynchronous component initialization
+
+**Network Resilience Features:**
+- **Auto-Recovery:** Automatic reconnection on network failures with exponential backoff
+- **Error Classification:** Separate handling for NetworkError, TimedOut, and TelegramError
+- **Retry Strategy:** Up to 5 attempts with delays of 1s, 2s, 4s, 8s, 16s
+- **Timeout Optimization:** HTTPXRequest with read/write/connect/pool timeout settings
+- **Connection Stability:** Enhanced settings for long polling and API communication
+
+**Technical Architecture:**
+- **Request Configuration:** HTTPXRequest with 60s read/write, 30s connect, 20s pool timeouts
+- **Long Polling:** Separate request configuration with 120s timeout for getUpdates
+- **Application Builder:** Proper timeout parameter configuration without conflicts
+- **Signal Handling:** asyncio.Event-based shutdown mechanism with SIGINT/SIGTERM support
+- **Cleanup Process:** Graceful updater stop, application stop, and shutdown sequence
+
+**Error Handling Enhancement:**
+- **NetworkError:** Automatic retry with exponential backoff
+- **TimedOut:** Dedicated timeout error recovery
+- **TelegramError:** Smart detection of "Bad Gateway" and "Internal Server Error"
+- **General Exceptions:** Fallback retry mechanism for unexpected errors
+- **KeyboardInterrupt:** Proper handling of manual shutdown requests
+
+**Files Modified:**
+- `main.py` - Complete rewrite of main() function with error handling
+- `main.py` - Added cleanup_app() and setup_handlers() functions
+- `main.py` - Enhanced imports for HTTPXRequest and signal handling
+
+**Deployment Impact:**
+- **Uptime Improvement:** Bot now survives Telegram API outages automatically
+- **Reduced Maintenance:** No manual intervention needed for network issues
+- **Production Stability:** Exponential backoff prevents API rate limiting
+- **Service Continuity:** Graceful recovery maintains user experience
+- **Monitoring Benefits:** Detailed logging for network issue troubleshooting
+
+**Testing Results:**
+- **Network Simulation:** Tested with artificially induced network failures
+- **API Outage Simulation:** Verified recovery during simulated Telegram downtime
+- **Signal Testing:** Confirmed proper shutdown with SIGINT/SIGTERM signals
+- **Retry Verification:** Validated exponential backoff timing and retry limits
+- **Production Deployment:** Successfully deployed with zero downtime
+
+**Risk Assessment:** Low - Changes focused on error handling and connection stability, no breaking changes to existing functionality
+
+---
 
 ### Version 1.8.1 - Topic-Based Context Isolation for Supergroups
 *June 30, 2025 10:15 MSK*

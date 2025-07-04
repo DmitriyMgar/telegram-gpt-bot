@@ -1,13 +1,19 @@
-from logger import logger
-import os
 import asyncio
+import os
+import logging
+import re
+import traceback
+import signal
+
+from logger import logger
 import tempfile
 from pathlib import Path
 import logging
 import re
+import traceback
 
 from telegram import Update, BotCommand
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
+from telegram.ext import Application, ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
 from config import TELEGRAM_BOT_TOKEN, CHANNEL_ID
 from openai_handler import send_message_and_get_response, send_message_and_get_response_for_chat, add_message_to_context, add_message_to_context_for_chat, get_message_history, export_message_history, send_image_and_get_response, send_image_and_get_response_for_chat, detect_image_generation_request, generate_image_dalle, send_document_and_get_response
 from session_manager import reset_thread, reset_chat_thread, get_thread_id_for_chat, set_thread_id_for_chat
@@ -18,6 +24,8 @@ from chat_detector import (
     should_process_message, should_respond_in_chat, get_chat_identifier, get_log_context, 
     is_private_chat, is_group_chat
 )
+from telegram.request import HTTPXRequest
+import telegram
 
 # Путь до лог-файла
 LOG_FILE = os.path.join(os.path.dirname(__file__), "bot.log")
@@ -712,18 +720,30 @@ def markdown_to_html(text):
     
     return text.strip()
 
-def main():
-    # Инициализируем аналитику
-    init_analytics_sync()
+async def setup_handlers(app):
+    """Настройка обработчиков бота"""
+    # Инициализируем аналитику асинхронно
+    try:
+        await analytics.init_database()
+        logger.info("✅ Аналитика инициализирована")
+    except Exception as analytics_init_error:
+        logger.error(f"❌ Ошибка инициализации аналитики: {analytics_init_error}")
     
-    app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
-
-    # Инициализируем информацию о боте для dual-mode operation
-    app.job_queue.run_once(lambda context: asyncio.create_task(init_bot_info(context.bot)), when=0.5)
+    # Инициализируем информацию о боте
+    try:
+        await init_bot_info(app.bot)
+        logger.info("✅ Информация о боте инициализирована")
+    except Exception as bot_info_error:
+        logger.error(f"❌ Ошибка инициализации информации о боте: {bot_info_error}")
     
     # Устанавливаем меню команд
-    app.job_queue.run_once(lambda context: asyncio.create_task(setup_bot_commands(context.bot)), when=1)
+    try:
+        await setup_bot_commands(app.bot)
+        logger.info("✅ Меню команд установлено")
+    except Exception as commands_error:
+        logger.error(f"❌ Ошибка установки меню команд: {commands_error}")
 
+    # Добавляем обработчики команд и сообщений
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("reset", reset))
     app.add_handler(CommandHandler("history", history))
@@ -733,23 +753,207 @@ def main():
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     app.add_handler(MessageHandler(filters.Document.PDF | filters.Document.TXT | filters.Document.Category("application/vnd.openxmlformats-officedocument.wordprocessingml.document"), handle_document))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    
+    logger.info("✅ Обработчики настроены")
 
-    print("Бот запущен...")
+async def cleanup_app(app):
+    """Безопасная остановка приложения"""
     try:
-        app.run_polling()
-    except KeyboardInterrupt:
-        logger.info("Bot stopped by user")
-    finally:
-        # Graceful shutdown
+        if hasattr(app, 'updater') and app.updater.running:
+            await app.updater.stop()
+            logger.info("✅ Updater остановлен")
+    except Exception as updater_error:
+        logger.warning(f"⚠️ Ошибка при остановке updater: {updater_error}")
+    
+    try:
+        if app.running:
+            await app.stop()
+            logger.info("✅ Приложение остановлено")
+    except Exception as stop_error:
+        logger.warning(f"⚠️ Ошибка при остановке приложения: {stop_error}")
+    
+    try:
+        await app.shutdown()
+        logger.info("✅ Приложение завершено")
+    except Exception as shutdown_error:
+        logger.warning(f"⚠️ Ошибка при завершении приложения: {shutdown_error}")
+
+async def main():
+    """Главная функция для запуска бота"""
+    logger.info("🚀 Запускаем Telegram бота...")
+    
+    # Проверяем наличие токена
+    bot_token = TELEGRAM_BOT_TOKEN
+    if not bot_token:
+        logger.error("❌ TELEGRAM_BOT_TOKEN не найден в конфигурации")
+        return
+
+    # Настройки для надежного соединения
+    request = HTTPXRequest(
+        read_timeout=60,        # Время ожидания ответа от сервера
+        write_timeout=60,       # Время ожидания отправки данных
+        connect_timeout=30,     # Время ожидания соединения
+        pool_timeout=20,        # Время ожидания соединения из пула
+    )
+    
+    get_updates_request = HTTPXRequest(
+        read_timeout=120,       # Увеличенный timeout для long polling
+        write_timeout=60,
+        connect_timeout=30,
+        pool_timeout=20,
+    )
+
+    # Создаем приложение бота с настройками устойчивости
+    app = (
+        Application.builder()
+        .token(bot_token)
+        .request(request)
+        .get_updates_request(get_updates_request)
+        .build()
+    )
+
+    # Добавляем обработчики
+    await setup_handlers(app)
+    
+    # Максимальное количество попыток восстановления
+    max_retries = 5
+    retry_count = 0
+    base_delay = 1  # Базовая задержка в секундах
+    
+    while retry_count < max_retries:
         try:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
+            logger.info(f"🔄 Попытка запуска #{retry_count + 1}")
+            
+            # Инициализируем приложение
+            await app.initialize()
+            logger.info("✅ Бот инициализирован")
+            
+            # Запускаем polling с обработкой ошибок
+            await app.start()
+            logger.info("✅ Бот запущен, начинаем polling...")
+            
+            # Сбрасываем счетчик попыток при успешном запуске
+            retry_count = 0
+            
+            # Запускаем polling с настройками устойчивости
+            await app.updater.start_polling(
+                poll_interval=1.0,              # Интервал между запросами
+                timeout=30,                     # Timeout для getUpdates
+                bootstrap_retries=3,            # Количество попыток при запуске
+                read_timeout=120,               # Timeout чтения
+                write_timeout=60,               # Timeout записи  
+                connect_timeout=30,             # Timeout соединения
+                pool_timeout=20,                # Timeout пула соединений
+                allowed_updates=None,           # Получаем все типы обновлений
+                drop_pending_updates=False      # Не пропускаем ожидающие обновления
+            )
+            
+            # Ожидаем остановки
+            stop_event = asyncio.Event()
+            
+            # Обработчик сигналов для graceful shutdown
+            def signal_handler():
+                logger.info("🛑 Получен сигнал остановки")
+                stop_event.set()
+            
+            # Устанавливаем обработчики сигналов
             try:
-                loop.run_until_complete(analytics.close())
-            finally:
-                loop.close()
+                signal.signal(signal.SIGINT, lambda s, f: signal_handler())
+                signal.signal(signal.SIGTERM, lambda s, f: signal_handler())
+            except Exception as signal_error:
+                logger.warning(f"⚠️ Не удалось установить обработчики сигналов: {signal_error}")
+            
+            # Ожидаем сигнал остановки
+            await stop_event.wait()
+            
+        except telegram.error.NetworkError as e:
+            retry_count += 1
+            delay = base_delay * (2 ** (retry_count - 1))  # Экспоненциальная задержка
+            
+            logger.warning(f"🌐 Сетевая ошибка (попытка {retry_count}/{max_retries}): {e}")
+            
+            if retry_count < max_retries:
+                logger.info(f"⏳ Переподключение через {delay} секунд...")
+                await asyncio.sleep(delay)
+                
+                # Останавливаем приложение перед повторной попыткой
+                await cleanup_app(app)
+                continue
+            else:
+                logger.error(f"❌ Превышено максимальное количество попыток переподключения")
+                break
+                
+        except telegram.error.TimedOut as e:
+            retry_count += 1
+            delay = base_delay * (2 ** (retry_count - 1))
+            
+            logger.warning(f"⏰ Timeout ошибка (попытка {retry_count}/{max_retries}): {e}")
+            
+            if retry_count < max_retries:
+                logger.info(f"⏳ Переподключение через {delay} секунд...")
+                await asyncio.sleep(delay)
+                await cleanup_app(app)
+                continue
+            else:
+                logger.error(f"❌ Превышено максимальное количество попыток переподключения")
+                break
+                
+        except telegram.error.TelegramError as e:
+            if "Bad Gateway" in str(e) or "Internal Server Error" in str(e):
+                retry_count += 1
+                delay = base_delay * (2 ** (retry_count - 1))
+                
+                logger.warning(f"🔧 Серверная ошибка Telegram (попытка {retry_count}/{max_retries}): {e}")
+                
+                if retry_count < max_retries:
+                    logger.info(f"⏳ Переподключение через {delay} секунд...")
+                    await asyncio.sleep(delay)
+                    await cleanup_app(app)
+                    continue
+                else:
+                    logger.error(f"❌ Превышено максимальное количество попыток переподключения")
+                    break
+            else:
+                logger.error(f"❌ Критическая ошибка Telegram API: {e}")
+                break
+                
+        except KeyboardInterrupt:
+            logger.info("🛑 Получен сигнал остановки от пользователя")
+            break
+            
+        except Exception as e:
+            logger.error(f"❌ Неожиданная ошибка: {e}")
+            logger.error(f"Traceback: {traceback.format_exc()}")
+            
+            # При неожиданной ошибке тоже пробуем переподключиться
+            retry_count += 1
+            if retry_count < max_retries:
+                delay = base_delay * (2 ** (retry_count - 1))
+                logger.info(f"⏳ Переподключение через {delay} секунд...")
+                await asyncio.sleep(delay)
+                await cleanup_app(app)
+                continue
+            else:
+                logger.error(f"❌ Превышено максимальное количество попыток переподключения")
+                break
+    
+    # Финальная остановка
+    try:
+        logger.info("🔄 Останавливаем бота...")
+        if app.running:
+            await app.stop()
+        await app.shutdown()
+        logger.info("✅ Бот остановлен")
+        
+        # Graceful shutdown аналитики
+        try:
+            await analytics.close()
+            logger.info("✅ Аналитика остановлена")
         except Exception as analytics_close_error:
-            logger.error(f"Error closing analytics: {analytics_close_error}")
+            logger.error(f"❌ Ошибка при остановке аналитики: {analytics_close_error}")
+            
+    except Exception as e:
+        logger.error(f"❌ Ошибка при остановке бота: {e}")
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
