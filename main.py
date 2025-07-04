@@ -15,7 +15,7 @@ import traceback
 from telegram import Update, BotCommand
 from telegram.ext import Application, ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
 from config import TELEGRAM_BOT_TOKEN, CHANNEL_ID
-from openai_handler import send_message_and_get_response, send_message_and_get_response_for_chat, add_message_to_context, add_message_to_context_for_chat, get_message_history, export_message_history, send_image_and_get_response, send_image_and_get_response_for_chat, detect_image_generation_request, generate_image_dalle, send_document_and_get_response
+from openai_handler import send_message_and_get_response, send_message_and_get_response_for_chat, add_message_to_context, add_message_to_context_for_chat, get_message_history, export_message_history, send_image_and_get_response, send_image_and_get_response_for_chat, add_image_to_context, add_image_to_context_for_chat, detect_image_generation_request, generate_image_dalle, send_document_and_get_response
 from session_manager import reset_thread, reset_chat_thread, get_thread_id_for_chat, set_thread_id_for_chat
 from telegram.constants import ChatAction
 from subscription_checker import check_channel_subscription
@@ -302,9 +302,52 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     logger.info(f"{log_context} - Photo received {'[RESPOND]' if should_respond else '[CONTEXT]'}")
     
-    # Photos require response processing, so if we shouldn't respond, skip
-    # (Unlike text messages, we don't add photos to context without processing them)
+    # If we shouldn't respond, add image to context and return
     if not should_respond:
+        try:
+            # Download image first for context processing
+            # Get the largest photo size
+            photo = update.message.photo[-1]
+            
+            # Check file size (max 20MB as per Telegram limit)
+            if photo.file_size > 20 * 1024 * 1024:
+                logger.warning(f"{log_context} - Image too large for context processing: {photo.file_size} bytes")
+                return
+            
+            # Get file info
+            file = await context.bot.get_file(photo.file_id)
+            
+            # Create temporary file
+            temp_dir = Path(tempfile.gettempdir()) / "telegram_bot_images"
+            temp_dir.mkdir(exist_ok=True)
+            
+            # Generate unique filename
+            file_extension = Path(file.file_path).suffix.lower()
+            if file_extension not in ['.jpg', '.jpeg', '.png', '.webp']:
+                logger.warning(f"{log_context} - Unsupported image format for context: {file_extension}")
+                return
+            
+            temp_file_path = temp_dir / f"image_{user_id}_{photo.file_unique_id}{file_extension}"
+            
+            # Download image using Telegram Bot API
+            await file.download_to_drive(temp_file_path)
+            
+            # Add to conversation context without responding
+            if is_private_chat(update):
+                # This shouldn't happen in private chats, but handle anyway
+                await add_image_to_context(user_id, str(temp_file_path), caption, username)
+            else:
+                # Add group image to context without responding
+                await add_image_to_context_for_chat(chat_identifier, str(temp_file_path), caption, username, user_id)
+            
+            logger.info(f"{log_context} - Image added to context (no response)")
+            
+        except Exception as context_error:
+            logger.error(f"Error adding image to context {log_context}: {context_error}")
+        finally:
+            # Clean up temp file
+            if 'temp_file_path' in locals() and temp_file_path.exists():
+                temp_file_path.unlink()
         return
     
     # From here on, we're responding to the photo

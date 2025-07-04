@@ -14,7 +14,7 @@
 ## 🎯 Project Overview
 
 **Project Name:** Telegram GPT Bot  
-**Current Version:** 1.8.2  
+**Current Version:** 1.8.3  
 **Last Updated:** July 4, 2025  
 **Status:** ✅ Production Ready  
 **Repository:** telegram-gpt-bot  
@@ -35,6 +35,7 @@
 
 | Version | Release Date | Status | Key Feature |
 |---------|--------------|---------|-------------|
+| **1.8.3** | Jul 4, 2025 | ✅ Complete | Image Context Enhancement for Groups |
 | **1.8.2** | Jul 4, 2025 | ✅ Complete | Network Error Resilience & Auto-Recovery |
 | **1.8.1** | Jun 30, 2025 | ✅ Complete | Topic-Based Context Isolation for Supergroups |
 | **1.8.0** | Jun 29, 2025 | ✅ Complete | Dual-Mode Bot Operation (Private + Group/Channel) |
@@ -50,6 +51,32 @@
 ---
 
 ## 🚀 Latest Release
+
+### Version 1.8.3 - Image Context Enhancement for Groups
+**Release Date:** July 4, 2025  
+**Development Time:** ~1 hour  
+**Status:** ✅ Production Ready - Deployed  
+
+#### 🎯 Key Features
+- **Image Context Processing:** Images sent to groups without bot mentions are now automatically added to conversation context
+- **Context-Only Functions:** New functions to add images to OpenAI threads without generating responses
+- **Enhanced Group Awareness:** Bot can reference previously sent images when directly addressed
+- **Dual-Mode Compatibility:** Full support for private chats, groups, supergroups, and topic-based conversations
+- **Resource Management:** Proper file tracking and cleanup integration with existing systems
+
+#### 📈 Impact
+- **Resolved:** Images sent without bot mentions were completely ignored, breaking conversation flow
+- **Enhanced:** Bot context awareness in group chats for better user experience
+- **Improved:** Conversation continuity when users reference previously sent images
+- **Maintained:** All existing functionality while adding new capabilities
+- **Optimized:** Resource usage with proper file lifecycle management
+
+#### 🔧 Technical Implementation
+- **New Functions:** `add_image_to_context()` and `add_image_to_context_for_chat()` in `openai_handler.py`
+- **Modified Logic:** Enhanced `handle_photo()` in `main.py` to process images for context without responding
+- **File Processing:** Complete download and upload pipeline for context-only images
+- **Error Handling:** Comprehensive validation for file size, format, and processing errors
+- **Logging Enhancement:** Clear distinction between `[RESPOND]` and `[CONTEXT]` operations
 
 ### Version 1.8.2 - Network Error Resilience & Auto-Recovery
 **Release Date:** July 4, 2025  
@@ -137,6 +164,68 @@
 - **Production Deployment:** Successfully deployed with zero downtime
 
 **Risk Assessment:** Low - Changes focused on error handling and connection stability, no breaking changes to existing functionality
+
+---
+
+### Version 1.8.3 - Image Context Enhancement for Groups
+*July 4, 2025 14:13 MSK*
+
+**Implementation Focus:** Enable image context processing in group chats without requiring bot mentions
+
+**Problem Solved:** Images sent to groups without tagging the bot (@botname) were not added to conversation context, causing disconnected conversations when users later referenced those images
+
+**Core Changes:**
+- Added `add_image_to_context()` function in `openai_handler.py` for user-based sessions
+- Added `add_image_to_context_for_chat()` function in `openai_handler.py` for group-based sessions
+- Modified `handle_photo()` logic in `main.py` to process images for context without responding
+- Enhanced import statements and error handling for comprehensive image processing
+- Integrated with existing Redis file tracking and cleanup mechanisms
+
+**Technical Architecture:**
+- **Context-Only Processing:** Images uploaded to OpenAI and added to conversation threads WITHOUT running assistant
+- **Dual-Mode Support:** Full compatibility with private chats, groups, supergroups, and topic-based conversations
+- **File Management:** Reused existing Redis tracking via `add_user_image()` and `add_chat_image()` functions
+- **Resource Cleanup:** Proper temporary file cleanup in finally blocks, integrated with `/reset` command
+- **Error Handling:** Comprehensive validation for file size (20MB limit), format checking, and processing errors
+
+**Image Processing Pipeline:**
+- **Download:** Full Telegram API download with file validation
+- **Upload:** OpenAI file upload with `purpose="vision"`
+- **Context Addition:** Thread message creation without assistant execution
+- **Tracking:** Redis file ID storage for cleanup management
+- **Cleanup:** Temporary file removal and proper resource management
+
+**Enhanced Logging:**
+- **Operation Distinction:** Clear `[RESPOND]` vs `[CONTEXT]` logging for debugging
+- **File Tracking:** Detailed logging of uploaded file IDs and processing stages
+- **Error Reporting:** Comprehensive error logging with context information
+- **Performance Monitoring:** File size and processing time tracking
+
+**Files Modified:**
+- `openai_handler.py` - Added 2 new context-only image functions (~110 lines)
+- `main.py` - Updated imports and modified handle_photo logic (~40 lines)
+- `docs/implementation-plan.md` - Comprehensive implementation documentation
+- `docs/progress.md` - Updated progress tracking
+
+**User Experience Enhancement:**
+- **Before:** Images sent without bot mentions were completely ignored
+- **After:** Images automatically added to conversation context for future reference
+- **Behavior:** Bot can now reference previously sent images when directly addressed
+- **Compatibility:** Zero breaking changes to existing functionality
+
+**Testing Strategy:**
+- **Basic Test:** Send image to group without mention → Ask bot about image with mention
+- **Cleanup Test:** Send multiple images → Use `/reset` → Verify proper file cleanup
+- **Error Test:** Send large/invalid images → Verify graceful error handling
+- **Topic Test:** Test in supergroup forums with different topics for isolation
+
+**Implementation Results:**
+- **Code Quality:** Zero code duplication, reused existing dual-mode patterns
+- **Resource Management:** Proper integration with existing cleanup mechanisms
+- **Performance:** Minimal overhead, same async processing as response-based images
+- **Reliability:** Comprehensive error handling prevents crashes or resource leaks
+
+**Risk Assessment:** Low - Changes contained within existing image processing pipeline, no breaking changes to core functionality
 
 ---
 
@@ -420,7 +509,7 @@
 ## 📊 Development Statistics
 
 ### Overall Project Metrics
-- **Total Versions:** 8 major releases
+- **Total Versions:** 9 major releases
 - **Development Period:** 7 months (2025)
 - **Core Files:** 3 main modules (`main.py`, `openai_handler.py`, `session_manager.py`)
 - **Dependencies:** 15+ Python packages
@@ -428,8 +517,8 @@
 - **API Integrations:** OpenAI, Telegram Bot API
 
 ### Code Quality Metrics
-- **Functions Added:** 25+ new functions across versions
-- **Lines of Code:** ~2000+ total implementation
+- **Functions Added:** 27+ new functions across versions
+- **Lines of Code:** ~2150+ total implementation
 - **Testing Coverage:** Comprehensive validation for all features
 - **Documentation:** English technical docs, Russian user interface
 - **Error Handling:** Robust exception management throughout
@@ -492,7 +581,7 @@
 
 ---
 
-**Last Updated:** June 29, 2025  
+**Last Updated:** July 4, 2025  
 **Next Review:** TBD  
 **Maintainer:** Development Team  
 **Status:** ✅ Active Development 

@@ -44,6 +44,19 @@ async def send_message_and_get_response(user_id: int, user_message: str, usernam
             break
         await asyncio.sleep(1)
 
+    # Проверка статуса выполнения
+    if run_status.status == "failed":
+        logger.error(f"[OpenAI] Assistant run failed for user {user_id}: {run_status.last_error}")
+        return "❌ Ошибка при обработке запроса. Попробуйте еще раз."
+    
+    if run_status.status == "cancelled":
+        logger.error(f"[OpenAI] Assistant run cancelled for user {user_id}")
+        return "❌ Запрос был отменен. Попробуйте еще раз."
+    
+    if run_status.status == "requires_action":
+        logger.warning(f"[OpenAI] Assistant requires action for user {user_id} - this is not supported")
+        return "❌ Запрос требует дополнительных действий, которые не поддерживаются."
+
     # Записываем использование токенов в аналитику
     tokens_used = 0
     if run_status.usage and run_status.usage.total_tokens:
@@ -59,8 +72,16 @@ async def send_message_and_get_response(user_id: int, user_message: str, usernam
 
     # Получаем только новые сообщения
     messages = await client.beta.threads.messages.list(thread_id=thread_id)
-
+    
+    # Логирование для диагностики (БЕЗ содержимого сообщений!)
+    logger.debug(f"[OpenAI] Retrieved {len(messages.data)} messages for user {user_id}")
+    logger.debug(f"[OpenAI] Run created at: {run.created_at}, status: {run_status.status}")
+    
+    assistant_messages_count = 0
     for message in reversed(messages.data):
+        if message.role == "assistant":
+            assistant_messages_count += 1
+        
         if (
             message.role == "assistant" and
             message.created_at >= run.created_at
@@ -68,6 +89,12 @@ async def send_message_and_get_response(user_id: int, user_message: str, usernam
             reply = message.content[0].text.value
             logger.info(f"[OpenAI] Response sent to user {user_id}")
             return reply
+    
+    # Логирование деталей если не найден подходящий ответ (БЕЗ содержимого!)
+    logger.warning(f"[OpenAI] No suitable response found for user {user_id}")
+    logger.warning(f"[OpenAI] Run status: {run_status.status}")
+    logger.warning(f"[OpenAI] Assistant messages found: {assistant_messages_count}")
+    logger.warning(f"[OpenAI] Run created_at: {run.created_at}")
 
     return "Ошибка: не удалось получить ответ."
 
@@ -129,6 +156,125 @@ async def add_message_to_context_for_chat(chat_identifier: str, user_message: st
         logger.error(f"Error adding message to context for {chat_identifier}: {e}")
 
 
+async def add_image_to_context(user_id: int, image_path: str, caption: str = "", username: str = None):
+    """
+    Adds an image to the conversation context without generating a response.
+    Used for maintaining context in group chats where bot shouldn't respond
+    but needs to track the conversation.
+    
+    Args:
+        user_id: User ID for session management
+        image_path: Path to the image file
+        caption: Optional caption text
+        username: Username for logging
+    """
+    thread_id = get_thread_id(user_id)
+    if not thread_id:
+        thread_id = await create_thread()
+        set_thread_id(user_id, thread_id)
+
+    try:
+        # Upload image file to OpenAI with purpose="vision"
+        with open(image_path, "rb") as image_file:
+            uploaded_file = await client.files.create(
+                file=image_file,
+                purpose="vision"
+            )
+        
+        # Save file_id in Redis for tracking
+        add_user_image(user_id, uploaded_file.id)
+        
+        # Create message content with uploaded file
+        message_content = [
+            {
+                "type": "image_file",
+                "image_file": {
+                    "file_id": uploaded_file.id,
+                    "detail": "high"
+                }
+            }
+        ]
+        
+        # Add text if caption provided
+        if caption.strip():
+            message_content.insert(0, {
+                "type": "text",
+                "text": caption
+            })
+        
+        # Add message to thread without running the assistant
+        await client.beta.threads.messages.create(
+            thread_id=thread_id,
+            role="user",
+            content=message_content
+        )
+        
+        logger.debug(f"Added image to context for user {user_id} (file_id: {uploaded_file.id})")
+        
+    except Exception as e:
+        logger.error(f"Error adding image to context for user {user_id}: {e}")
+
+
+async def add_image_to_context_for_chat(chat_identifier: str, image_path: str, caption: str = "", username: str = None, user_id: int = None):
+    """
+    Dual-mode version: Adds an image to the conversation context without generating a response.
+    Used for maintaining context in group chats where bot shouldn't respond
+    but needs to track the conversation.
+    
+    Args:
+        chat_identifier: Either "user:USER_ID" or "chat:CHAT_ID"
+        image_path: Path to the image file
+        caption: Optional caption text
+        username: Username for logging
+        user_id: User ID for analytics (required for group chats)
+    """
+    thread_id = get_thread_id_for_chat(chat_identifier)
+    if not thread_id:
+        thread_id = await create_thread()
+        set_thread_id_for_chat(chat_identifier, thread_id)
+
+    try:
+        # Upload image file to OpenAI with purpose="vision"
+        with open(image_path, "rb") as image_file:
+            uploaded_file = await client.files.create(
+                file=image_file,
+                purpose="vision"
+            )
+        
+        # Save file_id in Redis for tracking
+        add_chat_image(chat_identifier, uploaded_file.id)
+        
+        # Create message content with uploaded file
+        message_content = [
+            {
+                "type": "image_file",
+                "image_file": {
+                    "file_id": uploaded_file.id,
+                    "detail": "high"
+                }
+            }
+        ]
+        
+        # Add text if caption provided
+        if caption.strip():
+            message_content.insert(0, {
+                "type": "text",
+                "text": caption
+            })
+        
+        # Add message to thread without running the assistant
+        await client.beta.threads.messages.create(
+            thread_id=thread_id,
+            role="user",
+            content=message_content
+        )
+        
+        logger.debug(f"Added image to context for {chat_identifier} (file_id: {uploaded_file.id})")
+        
+    except Exception as e:
+        logger.error(f"Error adding image to context for {chat_identifier}: {e}")
+
+
 async def send_message_and_get_response_for_chat(chat_identifier: str, user_message: str, username: str = None, user_id: int = None) -> str:
     """
     Dual-mode version of send_message_and_get_response that works with chat identifiers.
@@ -170,6 +316,19 @@ async def send_message_and_get_response_for_chat(chat_identifier: str, user_mess
             break
         await asyncio.sleep(1)
 
+    # Проверка статуса выполнения
+    if run_status.status == "failed":
+        logger.error(f"[OpenAI] Assistant run failed for {chat_identifier}: {run_status.last_error}")
+        return "❌ Ошибка при обработке запроса. Попробуйте еще раз."
+    
+    if run_status.status == "cancelled":
+        logger.error(f"[OpenAI] Assistant run cancelled for {chat_identifier}")
+        return "❌ Запрос был отменен. Попробуйте еще раз."
+    
+    if run_status.status == "requires_action":
+        logger.warning(f"[OpenAI] Assistant requires action for {chat_identifier} - this is not supported")
+        return "❌ Запрос требует дополнительных действий, которые не поддерживаются."
+
     # Записываем использование токенов в аналитику
     tokens_used = 0
     if run_status.usage and run_status.usage.total_tokens:
@@ -190,8 +349,16 @@ async def send_message_and_get_response_for_chat(chat_identifier: str, user_mess
 
     # Получаем только новые сообщения
     messages = await client.beta.threads.messages.list(thread_id=thread_id)
-
+    
+    # Логирование для диагностики (БЕЗ содержимого сообщений!)
+    logger.debug(f"[OpenAI] Retrieved {len(messages.data)} messages for {chat_identifier}")
+    logger.debug(f"[OpenAI] Run created at: {run.created_at}, status: {run_status.status}")
+    
+    assistant_messages_count = 0
     for message in reversed(messages.data):
+        if message.role == "assistant":
+            assistant_messages_count += 1
+        
         if (
             message.role == "assistant" and
             message.created_at >= run.created_at
@@ -199,6 +366,12 @@ async def send_message_and_get_response_for_chat(chat_identifier: str, user_mess
             reply = message.content[0].text.value
             logger.info(f"[OpenAI] Response sent for {chat_identifier}")
             return reply
+    
+    # Логирование деталей если не найден подходящий ответ (БЕЗ содержимого!)
+    logger.warning(f"[OpenAI] No suitable response found for {chat_identifier}")
+    logger.warning(f"[OpenAI] Run status: {run_status.status}")
+    logger.warning(f"[OpenAI] Assistant messages found: {assistant_messages_count}")
+    logger.warning(f"[OpenAI] Run created_at: {run.created_at}")
 
     return "Ошибка: не удалось получить ответ."
 
@@ -313,6 +486,14 @@ async def send_image_and_get_response(user_id: int, image_path: str, caption: st
         if run_status.status == "failed":
             logger.error(f"Assistant run failed: {run_status.last_error}")
             return "❌ Ошибка при анализе изображения. Попробуйте еще раз."
+        
+        if run_status.status == "cancelled":
+            logger.error(f"[OpenAI] Assistant run cancelled for user {user_id}")
+            return "❌ Запрос был отменен. Попробуйте еще раз."
+        
+        if run_status.status == "requires_action":
+            logger.warning(f"[OpenAI] Assistant requires action for user {user_id} - this is not supported")
+            return "❌ Запрос требует дополнительных действий, которые не поддерживаются."
 
         # Record token usage
         tokens_used = 0
@@ -431,6 +612,14 @@ async def send_image_and_get_response_for_chat(chat_identifier: str, image_path:
         if run_status.status == "failed":
             logger.error(f"Assistant run failed: {run_status.last_error}")
             return "❌ Ошибка при анализе изображения. Попробуйте еще раз."
+        
+        if run_status.status == "cancelled":
+            logger.error(f"[OpenAI] Assistant run cancelled for {chat_identifier}")
+            return "❌ Запрос был отменен. Попробуйте еще раз."
+        
+        if run_status.status == "requires_action":
+            logger.warning(f"[OpenAI] Assistant requires action for {chat_identifier} - this is not supported")
+            return "❌ Запрос требует дополнительных действий, которые не поддерживаются."
 
         # Record token usage
         tokens_used = 0
@@ -532,6 +721,14 @@ async def send_document_and_get_response(user_id: int, local_file_path: str, use
         if run_status.status == "failed":
             logger.error(f"Assistant run failed: {run_status.last_error}")
             return "❌ Ошибка при анализе документа. Попробуйте еще раз."
+        
+        if run_status.status == "cancelled":
+            logger.error(f"[OpenAI] Assistant run cancelled for user {user_id}")
+            return "❌ Запрос был отменен. Попробуйте еще раз."
+        
+        if run_status.status == "requires_action":
+            logger.warning(f"[OpenAI] Assistant requires action for user {user_id} - this is not supported")
+            return "❌ Запрос требует дополнительных действий, которые не поддерживаются."
 
         # Record token usage
         tokens_used = 0

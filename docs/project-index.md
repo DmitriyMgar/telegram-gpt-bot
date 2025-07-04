@@ -3,7 +3,7 @@
 ## Project Overview
 
 **Project Name:** Telegram GPT Bot  
-**Version:** 1.8.2  
+**Version:** 1.8.3  
 **Language:** Python 3.8+  
 **Architecture:** Asynchronous, microservice-style modular design  
 **Primary Purpose:** Channel-subscription-gated Telegram bot with OpenAI Assistant integration, DALL-E image generation, document processing, user analytics, comprehensive file handling, and **dual-mode operation** (private chats + group/channel administrator mode)
@@ -15,7 +15,7 @@
 - **AI Chat Interface**: Users interact with OpenAI Assistant via Telegram
 - **Document Processing**: Support for PDF, TXT, and DOCX files with AI analysis using OpenAI file_search
 - **DALL-E Image Generation**: Text-to-image generation with natural language detection and explicit commands
-- **Image Processing**: Support for image uploads with OpenAI Vision API integration
+- **Image Processing**: Support for image uploads with OpenAI Vision API integration and **context-aware processing** (images automatically added to conversation context in groups)
 - **Channel-Based Authorization**: Access control through Telegram channel subscription verification
 - **Persistent Conversations**: Redis-backed thread management for conversation continuity with per-chat threading
 - **Export/History Features**: Chat history retrieval and export capabilities
@@ -201,6 +201,16 @@ telegram-gpt-bot/
   - **NEW**: Chat-based image processing
   - Uses chat_identifier for session management
   - Supports dual-mode file tracking and cleanup
+
+- `add_image_to_context(user_id: int, image_path: str, caption: str = "", username: str = None) -> None`
+  - **NEW**: Adds images to conversation context without generating responses
+  - Critical for group chat context awareness in dual-mode operation
+  - Allows bot to understand image context even when not directly addressed
+
+- `add_image_to_context_for_chat(chat_identifier: str, image_path: str, caption: str = "", username: str = None, user_id: int = None) -> None`
+  - **NEW**: Chat-based version of image context addition
+  - Enables image context processing in groups without requiring bot mentions
+  - Maintains conversation continuity for image references
 
 - `add_message_to_context(chat_identifier: str, message: str, user_id: int) -> None`
   - **NEW**: Adds messages to conversation context without generating responses
